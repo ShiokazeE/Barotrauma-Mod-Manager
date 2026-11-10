@@ -8,7 +8,7 @@
 
 Barotrauma Mod Manager помогает искать моды и коллекции в Steam Workshop, устанавливать их в `LocalMods`, управлять отдельными профилями и применять выбранный порядок загрузки в игре.
 
-> **Статус проекта:** любительский проект в активной разработке. Текущая версия исходников — 2.7.1. Проверенный Windows EXE будет опубликован в GitHub Releases после тестирования сборки на Windows.
+> **Статус проекта:** любительский проект в активной разработке. Версия 2.7.1 проверена на Windows; портативная сборка публикуется в GitHub Releases.
 
 Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma-Mod-Manager/) · Source code: [GitHub repository](https://github.com/ShiokazeE/Barotrauma-Mod-Manager)
 
@@ -27,11 +27,11 @@ Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma
 
 ## Скриншот
 
-Скриншоты настоящего интерфейса появятся после проверки Windows-сборки. Мы не используем демонстрационные изображения, которые могут вводить пользователей в заблуждение.
+Скриншоты настоящего интерфейса будут добавлены отдельно. Для скачивания доступна настоящая Windows-сборка, а не демонстрационный макет.
 
 ## Скачать
 
-Открой **[GitHub Releases](https://github.com/ShiokazeE/Barotrauma-Mod-Manager/releases)** и скачай последний проверенный пакет для Windows, когда он будет опубликован.
+Открой **[GitHub Releases](https://github.com/ShiokazeE/Barotrauma-Mod-Manager/releases)**, скачай ZIP для Windows, распакуй его и запусти `BarotraumaModManager.exe`.
 
 Распакуй архив и запусти `BarotraumaModManager.exe`. Профили, SteamCMD и зашифрованный API-ключ хранятся в пользовательской папке данных Windows, а не рядом с EXE.
 
