@@ -191,7 +191,6 @@ _EN = {
     "Конфликтов не обнаружено.\n": "No conflicts found.\n",
     "Профиль применен в config_player.xml!": "Profile applied to config_player.xml!",
     "Файл сохранён:\n": "File saved:\n",
-    "Ключ должен содержать 32 шестнадцатеричных символа.": "The key must contain 32 hexadecimal characters.",
     "Импорт завершён": "Import complete",
     "Ошибка импорта": "Import error",
 
@@ -299,7 +298,6 @@ _FRAGMENTS = (
     ("Автоустановка не удалась:", "Automatic installation failed:"),
     ("Попробует снова при скачивании модов.", "It will retry when downloading mods."),
     ("Установлено и включено", "installed and enabled"),
-    ("модов за ", "mods in "),
     ("Порядок готов.", "Order is ready."),
     ("проверяю filelist.xml", "checking filelist.xml"),
     ("файл filelist.xml найден", "filelist.xml found"),
@@ -309,15 +307,6 @@ _FRAGMENTS = (
     ("Повторно использован изолированный кэш.", "Reused isolated cache."),
     ("Установлен:", "Installed:"),
     ("Найдено ", "Found "),
-    ("модов", "mods"),
-    ("дата неизвестна", "date unknown"),
-    ("автор не указан", "author not provided"),
-    ("КОЛЛЕКЦИЯ  ·  ID ", "COLLECTION  ·  ID "),
-    ("элементов: ", "items: "),
-    ("обновлена: ", "updated: "),
-    ("подписок: ", "subscribers: "),
-    ("обновлён: ", "updated: "),
-    ("АВТОРСКИЙ ПОРЯДОК · ", "AUTHOR ORDER · "),
     ("Не удалось скачать ", "Could not download "),
     (" шт.:", " item(s):"),
     ("Проверка завершена: загружаемых обновлений не найдено.", "Check complete: no downloadable updates were found."),
@@ -349,6 +338,8 @@ def translate(value: object, language: str = "ru") -> object:
     match = re.fullmatch(r"(\d+)\s+модов\s+·\s+Профиль:\s+(.+)", value)
     if match:
         return f"{match.group(1)} mods · Profile: {match.group(2)}"
+    if value.startswith("АВТОРСКИЙ ПОРЯДОК · "):
+        return "AUTHOR ORDER · " + value[len("АВТОРСКИЙ ПОРЯДОК · "):]
 
     result = value
     for source, target in _FRAGMENTS:
