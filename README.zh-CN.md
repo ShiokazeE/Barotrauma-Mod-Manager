@@ -15,6 +15,7 @@ Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma
 ## 功能
 
 - 使用个人 Steam Web API Key 搜索创意工坊模组和合集。
+- 桌面界面支持俄语和英语；首次启动时选择，语言偏好保存在本机。
 - 一键下载模组到 `LocalMods` 并添加到当前配置。
 - 导入合集，包括嵌套合集。
 - 创建、复制、切换和删除多个配置。
@@ -34,6 +35,10 @@ Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma
 前往 **[GitHub Releases](https://github.com/ShiokazeE/Barotrauma-Mod-Manager/releases)** 下载 Windows ZIP，解压后运行 `BarotraumaModManager.exe`。
 
 解压后运行 `BarotraumaModManager.exe`。配置文件、SteamCMD 数据和加密后的 API Key 保存在当前 Windows 用户的数据目录中，不会放在 EXE 旁边。
+
+## 界面语言
+
+首次启动时选择**俄语**或**英语**。选择保存在本机的 `language.json` 中，与模组配置文件分开存储。之后可以使用窗口顶部的 **RU / EN** 按钮更改语言；需要重新启动管理器才能应用。
 
 ## 从源码运行
 
@@ -87,6 +92,12 @@ Pillow 用于显示创意工坊缩略图。未安装 Pillow 时，搜索和下�
 py -3 tests/test_barotrauma_mod_manager.py
 ```
 
+运行语言与设置回归测试：
+
+```powershell
+py -3 tests/test_localization.py
+```
+
 运行 Workshop 滚动与窗口缩放测试（需要 Windows 图形桌面会话）：
 
 ```powershell
@@ -110,3 +121,7 @@ py -3 tests/test_workshop_gui_hotfix.py
 ## 免责声明
 
 这是一个非官方社区工具。本项目与 FakeFish、Daedalic Entertainment 或 Valve 没有关联，也未获得其背书。Barotrauma 和 Steam 是其各自所有者的商标。
+
+## 支持项目
+
+Barotrauma Mod Manager 始终免费。如果这个项目对你有帮助，可以通过 [Boosty](https://boosty.to/shiokaze/single-payment/donation/841459/target?share=target_link) 自愿支持后续开发。捐赠不会解锁付费功能。
