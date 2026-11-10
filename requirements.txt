@@ -1,2 +1,2 @@
+requests>=2.31.0,<3.0
 Pillow>=10.0.0
-pyinstaller>=6.0.0
