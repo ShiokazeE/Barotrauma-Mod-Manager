@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="assets/banner.png" alt="Barotrauma Mod Manager 横幅" width="100%">
-  <h1>Barotrauma Mod Manager</h1>
+  <img src="assets/logo.svg" alt="Barotrauma Mod Manager" width="96">
+<h1>Barotrauma Mod Manager</h1>
   <p><strong>适用于 Barotrauma 的 Steam 创意工坊与模组加载顺序管理器。</strong></p>
   <p><a href="README.md">English</a> · <a href="README.ru.md">Русский</a></p>
 </div>
@@ -26,9 +26,7 @@ Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma
 
 ## 截图
 
-<div align="center">
-  <img src="assets/screenshots/manager-2.7.png" alt="Barotrauma Mod Manager 配置界面" width="100%">
-</div>
+完整界面截图将在下一次经过验证的 Windows 构建后添加。
 
 ## 下载
 
