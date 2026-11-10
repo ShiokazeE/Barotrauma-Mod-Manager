@@ -50,6 +50,7 @@ _EN = {
     "СТАТУС": "STATUS",
     "ГРУППА": "GROUP",
     "МОД": "MOD",
+    "Фреймворк": "Framework",
     "Только субмарины": "Submarine only",
     "Исправления и производительность": "Fixes & performance",
     "Совместимость и патчи": "Compatibility & patches",
@@ -326,6 +327,12 @@ def translate(value: object, language: str = "ru") -> object:
     exact = _EN.get(value)
     if exact is not None:
         return exact
+
+    # Translate only known application-owned prefixes. Dynamic suffixes such as
+    # file paths, server error details and Workshop IDs are kept verbatim.
+    for source in sorted(_EN, key=len, reverse=True):
+        if source.endswith((" ", ": ", "(", "\\n")) and value.startswith(source):
+            return _EN[source] + value[len(source):]
 
     # Dynamic counters and short status lines.
     match = re.fullmatch(r"(\d+)\s+модов", value)
