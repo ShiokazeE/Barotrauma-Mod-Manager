@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="assets/banner.png" alt="Баннер Barotrauma Mod Manager" width="100%">
-  <h1>Barotrauma Mod Manager</h1>
+  <img src="assets/logo.svg" alt="Barotrauma Mod Manager" width="96">
+<h1>Barotrauma Mod Manager</h1>
   <p><strong>Менеджер Steam Workshop и порядка загрузки модов для Barotrauma.</strong></p>
   <p><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a></p>
 </div>
@@ -26,9 +26,7 @@ Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma
 
 ## Скриншот
 
-<div align="center">
-  <img src="assets/screenshots/manager-2.7.png" alt="Окно профилей Barotrauma Mod Manager" width="100%">
-</div>
+Скриншот полного интерфейса будет добавлен после следующей проверенной сборки Windows.
 
 ## Скачать
 
