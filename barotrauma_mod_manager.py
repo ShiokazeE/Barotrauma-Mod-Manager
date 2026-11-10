@@ -2585,7 +2585,7 @@ class ModManagerGUI(tk.Tk):
         ent_ws.insert(0, "Вставь ссылку на Workshop или ID мода / коллекции")
         ent_ws.bind(
             "<FocusIn>", lambda _event: ent_ws.delete(0, tk.END)
-            if ent_ws.get().startswith("Вставь ссылку") else None,
+            if ent_ws.get().startswith(("Вставь ссылку", "Paste a Workshop link")) else None,
         )
         self.dl_btn = button(
             add_frame, "СКАЧАТЬ И ДОБАВИТЬ", self.download_and_add_to_profile,
