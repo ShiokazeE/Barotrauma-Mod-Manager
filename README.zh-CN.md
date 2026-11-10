@@ -1,8 +1,9 @@
 <div align="center">
   <img src="assets/logo.svg" alt="Barotrauma Mod Manager" width="96">
-<h1>Barotrauma Mod Manager</h1>
+  <h1>Barotrauma Mod Manager</h1>
   <p><strong>适用于 Barotrauma 的 Steam 创意工坊与模组加载顺序管理器。</strong></p>
   <p><a href="README.md">English</a> · <a href="README.ru.md">Русский</a></p>
+  <p><a href="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/actions/workflows/ci.yml"><img src="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a></p>
 </div>
 
 Barotrauma Mod Manager 可以搜索 Steam 创意工坊中的模组和合集，将内容安装到 `LocalMods`，管理多个模组配置，并把选定的加载顺序应用到游戏。
@@ -26,7 +27,7 @@ Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma
 
 ## 截图
 
-完整界面截图将在下一次经过验证的 Windows 构建后添加。
+在 Windows 版本完成实际测试后，我们会添加真实程序截图。我们不会使用可能误导用户的虚构界面图片。
 
 ## 下载
 
