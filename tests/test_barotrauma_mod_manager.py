@@ -12,7 +12,7 @@ with tempfile.TemporaryDirectory() as config_tmp:
     os.environ['XDG_CONFIG_HOME'] = config_tmp
     os.environ['LOCALAPPDATA'] = config_tmp
     import importlib.util
-    spec = importlib.util.spec_from_file_location('baro_v2', Path(__file__).with_name('barotrauma_mod_manager.py'))
+    spec = importlib.util.spec_from_file_location('baro_v2', Path(__file__).resolve().parents[1] / 'barotrauma_mod_manager.py')
     mod = importlib.util.module_from_spec(spec)
     import sys
     sys.modules[spec.name] = mod
