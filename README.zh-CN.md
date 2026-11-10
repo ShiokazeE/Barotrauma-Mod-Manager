@@ -8,7 +8,7 @@
 
 Barotrauma Mod Manager 可以搜索 Steam 创意工坊中的模组和合集，将内容安装到 `LocalMods`，管理多个模组配置，并把选定的加载顺序应用到游戏。
 
-> **项目状态：** 社区开发项目，仍在积极维护。当前源码版本为 2.7.1。经过 Windows 环境验证的 EXE 将在测试完成后发布到 GitHub Releases。
+> **项目状态：** 社区开发项目，仍在积极维护。2.7.1 版本已在 Windows 上测试；便携版 Windows 程序随本次发布提供。
 
 Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma-Mod-Manager/) · Source code: [GitHub repository](https://github.com/ShiokazeE/Barotrauma-Mod-Manager)
 
@@ -27,11 +27,11 @@ Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma
 
 ## 截图
 
-在 Windows 版本完成实际测试后，我们会添加真实程序截图。我们不会使用可能误导用户的虚构界面图片。
+真实程序截图将在后续单独添加。下载包为实际 Windows 程序，并非界面模型图。
 
 ## 下载
 
-前往 **[GitHub Releases](https://github.com/ShiokazeE/Barotrauma-Mod-Manager/releases)**，在经过验证的 Windows 安装包发布后下载最新版本。
+前往 **[GitHub Releases](https://github.com/ShiokazeE/Barotrauma-Mod-Manager/releases)** 下载 Windows ZIP，解压后运行 `BarotraumaModManager.exe`。
 
 解压后运行 `BarotraumaModManager.exe`。配置文件、SteamCMD 数据和加密后的 API Key 保存在当前 Windows 用户的数据目录中，不会放在 EXE 旁边。
 
