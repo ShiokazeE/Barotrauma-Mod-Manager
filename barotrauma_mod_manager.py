@@ -2086,6 +2086,8 @@ class ModManagerGUI(tk.Tk):
         self.bind_all("<Map>", self._on_widget_map, add="+")
         self._build_ui()
         self._localize_widget_tree(self)
+        if hasattr(self, "mod_context_menu"):
+            self._localize_widget_tree(self.mod_context_menu)
         self._watch_localized_variables()
         self._refresh_profile_selector()
         self._refresh_mod_listbox()
