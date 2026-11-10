@@ -324,6 +324,16 @@ def translate(value: object, language: str = "ru") -> object:
     if language != "en" or not isinstance(value, str):
         return value
 
+    # Notebook tabs and aligned labels sometimes include intentional padding.
+    # Translate the visible text while preserving the original layout spacing.
+    stripped = value.strip()
+    if stripped != value:
+        exact_stripped = _EN.get(stripped)
+        if exact_stripped is not None:
+            leading = value[:len(value) - len(value.lstrip())]
+            trailing = value[len(value.rstrip()):]
+            return leading + exact_stripped + trailing
+
     exact = _EN.get(value)
     if exact is not None:
         return exact
