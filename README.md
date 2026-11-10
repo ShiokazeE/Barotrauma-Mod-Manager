@@ -10,6 +10,7 @@
     <img src="https://img.shields.io/badge/Python-3.10%2B-3776ab?logo=python&logoColor=white" alt="Python 3.10+">
     <img src="https://img.shields.io/badge/version-2.7.1-17a673" alt="Version 2.7.1">
     <img src="https://img.shields.io/badge/game-Barotrauma-0d6578" alt="Barotrauma">
+    <a href="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/actions/workflows/ci.yml"><img src="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   </p>
 </div>
 
@@ -34,9 +35,7 @@ Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma
 
 ## Screenshots
 
-<div align="center">
-  <img src="assets/screenshots/manager-2.7.png" alt="Barotrauma Mod Manager profile window" width="100%">
-</div>
+Screenshots of the actual Windows application will be added after the current build has been smoke-tested. The repository will not use mock screenshots that could misrepresent the interface.
 
 ## Download
 
