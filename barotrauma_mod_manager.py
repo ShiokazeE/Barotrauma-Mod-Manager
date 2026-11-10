@@ -21,6 +21,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import parse_qs, urljoin, urlparse
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, simpledialog, ttk
+from localization import choose_or_load_language, save_language, translate
 import requests
 try:
     from PIL import Image, ImageTk
@@ -57,6 +58,7 @@ else:
 APP_DATA_DIR = _data_root / "BarotraumaModManager"
 APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
 STATE_FILE = APP_DATA_DIR / "baro_profiles.json"
+LANGUAGE_FILE = APP_DATA_DIR / "language.json"
 STEAM_API_KEY_FILE = APP_DATA_DIR / "steam_api_key.dpapi"
 LEGACY_STATE_FILE = APP_DIR / "baro_profiles.json"
 if not STATE_FILE.exists() and LEGACY_STATE_FILE.exists():
@@ -329,16 +331,17 @@ class WindowsSecretStore:
 class ProfileStore:
     """Thread-safe, atomic persistence for profiles and installed Workshop versions."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, default_profile: str = "Основной"):
         self.path = path
+        self.default_profile = default_profile
         self._lock = threading.RLock()
         self.data = {
             "schema_version": 3,
             "game_dir": "",
             "steamcmd_path": str(DEFAULT_STEAMCMD_EXE) if DEFAULT_STEAMCMD_EXE.exists() else "",
-            "active_profile": "Основной",
+            "active_profile": self.default_profile,
             "installed_versions": {},
-            "profiles": {"Основной": []},
+            "profiles": {self.default_profile: []},
             "profile_sources": {},
             "parallel_downloads": 2,
         }
@@ -365,7 +368,7 @@ class ProfileStore:
 
             profiles = self.data.get("profiles")
             if not isinstance(profiles, dict) or not profiles:
-                profiles = {"Основной": []}
+                profiles = {self.default_profile: []}
             normalized_profiles = {}
             for name, mods in profiles.items():
                 if not isinstance(name, str) or not name.strip():
@@ -384,7 +387,7 @@ class ProfileStore:
                 normalized_profiles[name.strip()] = valid_mods
 
             if not normalized_profiles:
-                normalized_profiles = {"Основной": []}
+                normalized_profiles = {self.default_profile: []}
             self.data["profiles"] = normalized_profiles
 
             raw_sources = self.data.get("profile_sources")
@@ -2045,6 +2048,8 @@ class BaroModManagerCore:
 class ModManagerGUI(tk.Tk):
     def __init__(self):
         super().__init__()
+        self.language = choose_or_load_language(self, LANGUAGE_FILE)
+        self._install_dialog_localization()
         self.title("Barotrauma Mod Manager 2.7.1")
         self.geometry("1260x860")
         self.minsize(1020, 720)
@@ -2067,7 +2072,8 @@ class ModManagerGUI(tk.Tk):
         self._api_key_store = WindowsSecretStore(STEAM_API_KEY_FILE)
         self._steam_api_key = self._api_key_store.load()
         self._log_queue = queue.Queue()
-        self.store = ProfileStore(STATE_FILE)
+        default_profile = "Main" if self.language == "en" else "Основной"
+        self.store = ProfileStore(STATE_FILE, default_profile=default_profile)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         detected_game = None
@@ -2077,7 +2083,10 @@ class ModManagerGUI(tk.Tk):
                 self.store.data["game_dir"] = str(detected_game)
                 self.store.save()
 
+        self.bind_all("<Map>", self._on_widget_map, add="+")
         self._build_ui()
+        self._localize_widget_tree(self)
+        self._watch_localized_variables()
         self._refresh_profile_selector()
         self._refresh_mod_listbox()
         self.after(100, self._drain_log)
@@ -2087,6 +2096,249 @@ class ModManagerGUI(tk.Tk):
         if detected_game:
             self.log(f"[Steam] Папка игры найдена автоматически: {detected_game}")
         self._bootstrap_steamcmd_background()
+    def _tr(self, value):
+        return translate(value, self.language)
+
+    def _install_dialog_localization(self):
+        """Translate native Tk dialogs without changing their return values."""
+        def wrap_messagebox(name):
+            original = getattr(messagebox, name)
+
+            def localized(*args, **kwargs):
+                args = list(args)
+                if len(args) > 0 and isinstance(args[0], str):
+                    args[0] = self._tr(args[0])
+                if len(args) > 1 and isinstance(args[1], str):
+                    args[1] = self._tr(args[1])
+                for key in ("title", "message", "detail"):
+                    if isinstance(kwargs.get(key), str):
+                        kwargs[key] = self._tr(kwargs[key])
+                return original(*args, **kwargs)
+
+            setattr(messagebox, name, localized)
+
+        for name in ("showinfo", "showwarning", "showerror", "askyesno",
+                     "askyesnocancel", "askokcancel", "askretrycancel"):
+            wrap_messagebox(name)
+
+        original_askstring = simpledialog.askstring
+
+        def localized_askstring(title, prompt, *args, **kwargs):
+            return original_askstring(
+                self._tr(title), self._tr(prompt), *args, **kwargs
+            )
+
+        simpledialog.askstring = localized_askstring
+
+        for name in ("askdirectory", "askopenfilename", "asksaveasfilename"):
+            original = getattr(filedialog, name)
+
+            def make_file_dialog(fn):
+                def localized_file_dialog(*args, **kwargs):
+                    if isinstance(kwargs.get("title"), str):
+                        kwargs["title"] = self._tr(kwargs["title"])
+                    filetypes = kwargs.get("filetypes")
+                    if filetypes:
+                        kwargs["filetypes"] = tuple(
+                            (self._tr(label), pattern) for label, pattern in filetypes
+                        )
+                    return fn(*args, **kwargs)
+                return localized_file_dialog
+
+            setattr(filedialog, name, make_file_dialog(original))
+
+    def _patch_widget_localization(self, widget):
+        """Translate subsequent text/values updates on this widget."""
+        if getattr(widget, "_bmm_i18n_patched", False):
+            return
+        try:
+            original_configure = widget.configure
+        except (AttributeError, tk.TclError):
+            return
+
+        def localized_configure(cnf=None, **kwargs):
+            if isinstance(cnf, dict):
+                cnf = dict(cnf)
+                if isinstance(cnf.get("text"), str):
+                    cnf["text"] = self._tr(cnf["text"])
+                if isinstance(cnf.get("values"), (tuple, list)):
+                    cnf["values"] = tuple(self._tr(v) for v in cnf["values"])
+            if isinstance(kwargs.get("text"), str):
+                kwargs["text"] = self._tr(kwargs["text"])
+            if isinstance(kwargs.get("values"), (tuple, list)):
+                kwargs["values"] = tuple(self._tr(v) for v in kwargs["values"])
+            return original_configure(cnf, **kwargs)
+
+        try:
+            widget.configure = localized_configure
+            widget.config = localized_configure
+            widget._bmm_i18n_patched = True
+        except (AttributeError, tk.TclError):
+            pass
+
+        if isinstance(widget, ttk.Treeview):
+            original_insert = widget.insert
+
+            def localized_tree_insert(parent, index, iid=None, **kwargs):
+                values = kwargs.get("values")
+                if isinstance(values, (tuple, list)):
+                    kwargs["values"] = tuple(self._tr(value) for value in values)
+                return original_insert(parent, index, iid=iid, **kwargs)
+
+            widget.insert = localized_tree_insert
+
+        elif isinstance(widget, tk.Text):
+            original_insert = widget.insert
+
+            def localized_text_insert(index, chars, *args, **kwargs):
+                if isinstance(chars, str):
+                    chars = self._tr(chars)
+                return original_insert(index, chars, *args, **kwargs)
+
+            widget.insert = localized_text_insert
+
+        elif isinstance(widget, tk.Entry):
+            original_insert = widget.insert
+
+            def localized_entry_insert(index, value):
+                if isinstance(value, str):
+                    value = self._tr(value)
+                return original_insert(index, value)
+
+            widget.insert = localized_entry_insert
+
+        if isinstance(widget, tk.Menu):
+            original_add_command = widget.add_command
+            original_entryconfigure = widget.entryconfigure
+
+            def localized_add_command(*args, **kwargs):
+                if isinstance(kwargs.get("label"), str):
+                    kwargs["label"] = self._tr(kwargs["label"])
+                return original_add_command(*args, **kwargs)
+
+            def localized_entryconfigure(index, cnf=None, **kwargs):
+                if isinstance(cnf, dict):
+                    cnf = dict(cnf)
+                    if isinstance(cnf.get("label"), str):
+                        cnf["label"] = self._tr(cnf["label"])
+                if isinstance(kwargs.get("label"), str):
+                    kwargs["label"] = self._tr(kwargs["label"])
+                return original_entryconfigure(index, cnf, **kwargs)
+
+            widget.add_command = localized_add_command
+            widget.entryconfigure = localized_entryconfigure
+
+    def _localize_widget_tree(self, root):
+        if self.language != "en":
+            return
+        try:
+            if isinstance(root, (tk.Tk, tk.Toplevel)):
+                root.title(self._tr(root.title()))
+            if isinstance(root, ttk.Notebook):
+                for tab_id in root.tabs():
+                    label = root.tab(tab_id, "text")
+                    translated = self._tr(label)
+                    if translated != label:
+                        root.tab(tab_id, text=translated)
+            if isinstance(root, ttk.Treeview):
+                for column in root["columns"]:
+                    caption = root.heading(column, "text")
+                    translated = self._tr(caption)
+                    if translated != caption:
+                        root.heading(column, text=translated)
+            if isinstance(root, tk.Menu):
+                end = root.index("end")
+                if end is not None:
+                    for index in range(end + 1):
+                        try:
+                            label = root.entrycget(index, "label")
+                            translated = self._tr(label)
+                            if translated != label:
+                                root.entryconfigure(index, label=translated)
+                        except tk.TclError:
+                            continue
+            self._patch_widget_localization(root)
+            try:
+                text = root.cget("text")
+                translated = self._tr(text)
+                if translated != text:
+                    root.configure(text=translated)
+            except (tk.TclError, AttributeError):
+                pass
+            if isinstance(root, ttk.Combobox):
+                values = root.cget("values")
+                current = root.get()
+                translated_values = tuple(self._tr(value) for value in values)
+                if tuple(values) != translated_values:
+                    root.configure(values=translated_values)
+                translated_current = self._tr(current)
+                if current != translated_current:
+                    root.set(translated_current)
+            if isinstance(root, tk.Entry):
+                current = root.get()
+                translated_current = self._tr(current)
+                if current and current != translated_current:
+                    root.delete(0, tk.END)
+                    root.insert(0, translated_current)
+            for child in root.winfo_children():
+                self._localize_widget_tree(child)
+        except tk.TclError:
+            return
+
+    def _on_widget_map(self, event):
+        if self.language == "en":
+            self._localize_widget_tree(event.widget)
+
+    def _watch_localized_variables(self):
+        """Translate display-only StringVars; leave internal selection values untouched."""
+        for name in (
+            "paths_summary_var", "profile_order_info_var",
+            "mod_count_var", "workshop_status_var",
+        ):
+            variable = getattr(self, name, None)
+            if variable is None:
+                continue
+
+            def localize_variable(*_args, var=variable):
+                try:
+                    value = var.get()
+                    translated = self._tr(value)
+                    if value != translated:
+                        var.set(translated)
+                except (tk.TclError, TypeError):
+                    pass
+
+            variable.trace_add("write", localize_variable)
+            localize_variable()
+
+    def _change_language(self):
+        target = "en" if self.language == "ru" else "ru"
+        question = (
+            "Switch the interface to English and restart the manager?"
+            if target == "en"
+            else "Переключить интерфейс на русский и перезапустить менеджер?"
+        )
+        if not messagebox.askyesno(self._tr("Сменить язык"), question, parent=self):
+            return
+        try:
+            save_language(LANGUAGE_FILE, target)
+        except OSError as exc:
+            messagebox.showerror(
+                self._tr("Ошибка"),
+                self._tr("Не удалось сохранить настройки языка: ") + str(exc),
+                parent=self,
+            )
+            return
+
+        # os.execl replaces this process, avoiding two manager instances.
+        if getattr(sys, "frozen", False):
+            os.execl(sys.executable, sys.executable, *sys.argv[1:])
+        else:
+            os.execl(
+                sys.executable, sys.executable,
+                os.path.abspath(sys.argv[0]), *sys.argv[1:],
+            )
+
     def _build_ui(self):
         BG = "#0d131b"
         PANEL = "#151e29"
@@ -2215,6 +2467,11 @@ class ModManagerGUI(tk.Tk):
             header_actions, textvariable=self.paths_summary_var, bg=BG, fg=MUTED,
             font=("Segoe UI", 8), anchor="e",
         ).pack(side="left", padx=(0, 10))
+        self.language_btn = button(
+            header_actions, "RU / EN", self._change_language,
+            color="#234763", hover="#2c6288", pady=8,
+        )
+        self.language_btn.pack(side="right", padx=(0, 7))
         self.paths_toggle_btn = button(
             header_actions, "⚙ НАСТРОЙКИ", self.toggle_paths_panel,
             color="#203b4d", hover="#2a536b", pady=8,
@@ -2576,8 +2833,8 @@ class ModManagerGUI(tk.Tk):
         return core
 
     def log(self, msg: str):
-        # потокобезопасно: из рабочих потоков только кладём в очередь
-        self._log_queue.put(msg)
+        # Worker threads only enqueue text; all Tk updates stay on the GUI thread.
+        self._log_queue.put(self._tr(msg))
 
     def _drain_log(self):
         if self._closing:
@@ -2586,9 +2843,9 @@ class ModManagerGUI(tk.Tk):
             while True:
                 msg = self._log_queue.get_nowait()
                 lowered = msg.casefold()
-                tag = "error" if "ошибка" in lowered or "✘" in msg else (
-                    "success" if "готово" in lowered or "✓" in msg or "✔" in msg else (
-                        "warning" if "предупреж" in lowered or "недоступ" in lowered else ""))
+                tag = "error" if ("ошибка" in lowered or "error" in lowered or "✘" in msg) else (
+                    "success" if ("готово" in lowered or "ready" in lowered or "complete" in lowered or "✓" in msg or "✔" in msg) else (
+                        "warning" if ("предупреж" in lowered or "warning" in lowered or "недоступ" in lowered or "unavailable" in lowered) else ""))
                 self.log_box.insert(tk.END, msg + "\n", tag)
                 self.log_box.see(tk.END)
         except queue.Empty:
@@ -2741,8 +2998,8 @@ class ModManagerGUI(tk.Tk):
     def _refresh_profile_selector(self):
         names = list(self.store.data["profiles"].keys())
         if not names:
-            names = ["Основной"]
-            self.store.data["profiles"] = {"Основной": []}
+            names = [self.store.default_profile]
+            self.store.data["profiles"] = {self.store.default_profile: []}
         if self.store.data["active_profile"] not in names:
             self.store.data["active_profile"] = names[0]
         self.profile_combo["values"] = names
@@ -2755,7 +3012,7 @@ class ModManagerGUI(tk.Tk):
         variable = getattr(self, "profile_order_info_var", None)
         if variable is None:
             return
-        profile_name = str(self.store.data.get("active_profile", "Основной"))
+        profile_name = str(self.store.data.get("active_profile", self.store.default_profile))
         source = self.store.get_profile_source(profile_name)
         mode = str(source.get("order_mode", ""))
         if source.get("format") == "Barotrauma ModList" and mode == "author":
@@ -2972,6 +3229,11 @@ class ModManagerGUI(tk.Tk):
             "По рейтингу": "rated",
             "Новые": "newest",
             "Недавно обновлённые": "updated",
+            "Most popular": "popular",
+            "Relevance": "relevance",
+            "Top rated": "rated",
+            "Newest": "newest",
+            "Recently updated": "updated",
         }.get(label, "popular")
 
     def _workshop_card_label(self, mod_id: str) -> str:
@@ -3058,7 +3320,7 @@ class ModManagerGUI(tk.Tk):
                   activebackground="#344154", relief="flat", padx=14, pady=7).pack(side="right")
 
     def _on_workshop_type_changed(self, _event=None):
-        kind = "Коллекции / модпаки" if self.workshop_type_var.get() != "Моды" else "Моды"
+        kind = "Коллекции / модпаки" if self.workshop_type_var.get() not in ("Моды", "Mods") else "Моды"
         self.workshop_search_btn.config(text=f"НАЙТИ {kind.upper()}")
         self.workshop_status_var.set(f"Каталог: {kind.lower()}. Выполни поиск.")
 
@@ -3073,7 +3335,7 @@ class ModManagerGUI(tk.Tk):
         sort_code = self._workshop_sort_code(self.workshop_sort_var.get())
         self.workshop_last_query = query
         self.workshop_last_sort = sort_code
-        self.workshop_last_type = "collections" if self.workshop_type_var.get() != "Моды" else "items"
+        self.workshop_last_type = "collections" if self.workshop_type_var.get() not in ("Моды", "Mods") else "items"
         self.workshop_append_results = False
         self.workshop_next_cursor = None
         self._start_workshop_search(cursor="*")
@@ -4171,7 +4433,7 @@ class ModManagerGUI(tk.Tk):
         if self._profile_job_running:
             return
         target = self.workshop_var.get().strip()
-        if not target or target.startswith("Ссылка на мод"):
+        if not target or target.startswith(("Ссылка на мод", "Paste a Workshop link")):
             messagebox.showinfo("Steam Workshop", "Вставьте ссылку на мод, коллекцию или числовой ID.")
             return
         core = self._get_core()
