@@ -1,8 +1,9 @@
 <div align="center">
   <img src="assets/logo.svg" alt="Barotrauma Mod Manager" width="96">
-<h1>Barotrauma Mod Manager</h1>
+  <h1>Barotrauma Mod Manager</h1>
   <p><strong>Менеджер Steam Workshop и порядка загрузки модов для Barotrauma.</strong></p>
   <p><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a></p>
+  <p><a href="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/actions/workflows/ci.yml"><img src="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a></p>
 </div>
 
 Barotrauma Mod Manager помогает искать моды и коллекции в Steam Workshop, устанавливать их в `LocalMods`, управлять отдельными профилями и применять выбранный порядок загрузки в игре.
@@ -26,7 +27,7 @@ Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma
 
 ## Скриншот
 
-Скриншот полного интерфейса будет добавлен после следующей проверенной сборки Windows.
+Скриншоты настоящего интерфейса появятся после проверки Windows-сборки. Мы не используем демонстрационные изображения, которые могут вводить пользователей в заблуждение.
 
 ## Скачать
 
