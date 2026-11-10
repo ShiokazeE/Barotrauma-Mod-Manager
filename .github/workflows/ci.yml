@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "setup/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run core regression tests
+        run: python tests/test_barotrauma_mod_manager.py
+      - name: Run Workshop GUI regression tests
+        run: python tests/test_workshop_gui_hotfix.py
