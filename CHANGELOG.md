@@ -2,6 +2,8 @@
 
 ## 2.7.1 — Workshop scrolling and resize hotfix
 
+- Added a Russian/English first-run language selector and a saved per-PC preference, with a header control to change languages.
+- Added a voluntary Boosty donation link; all manager features remain free.
 - Fixed mouse-wheel handling over Workshop card children and filtered scrolling to the Workshop results area.
 - Added support for high-resolution wheel deltas and X11 wheel buttons.
 - Debounced Canvas width and scroll-region recalculation during resize and card rendering.
