@@ -2157,15 +2157,16 @@ class ModManagerGUI(tk.Tk):
             return
 
         def localized_configure(cnf=None, **kwargs):
+            preserve_profile_names = widget is getattr(self, "profile_combo", None)
             if isinstance(cnf, dict):
                 cnf = dict(cnf)
                 if isinstance(cnf.get("text"), str):
                     cnf["text"] = self._tr(cnf["text"])
-                if isinstance(cnf.get("values"), (tuple, list)):
+                if not preserve_profile_names and isinstance(cnf.get("values"), (tuple, list)):
                     cnf["values"] = tuple(self._tr(v) for v in cnf["values"])
             if isinstance(kwargs.get("text"), str):
                 kwargs["text"] = self._tr(kwargs["text"])
-            if isinstance(kwargs.get("values"), (tuple, list)):
+            if not preserve_profile_names and isinstance(kwargs.get("values"), (tuple, list)):
                 kwargs["values"] = tuple(self._tr(v) for v in kwargs["values"])
             return original_configure(cnf, **kwargs)
 
@@ -2180,9 +2181,15 @@ class ModManagerGUI(tk.Tk):
             original_insert = widget.insert
 
             def localized_tree_insert(parent, index, iid=None, **kwargs):
+                # The profile table columns are number/status/group/title/id.
+                # Translate app-owned status/category labels only; mod titles are
+                # Workshop data and must remain byte-for-byte as received.
                 values = kwargs.get("values")
-                if isinstance(values, (tuple, list)):
-                    kwargs["values"] = tuple(self._tr(value) for value in values)
+                if isinstance(values, (tuple, list)) and len(values) >= 3:
+                    translated = list(values)
+                    translated[1] = self._tr(translated[1])
+                    translated[2] = self._tr(translated[2])
+                    kwargs["values"] = tuple(translated)
                 return original_insert(parent, index, iid=iid, **kwargs)
 
             widget.insert = localized_tree_insert
@@ -2196,16 +2203,6 @@ class ModManagerGUI(tk.Tk):
                 return original_insert(index, chars, *args, **kwargs)
 
             widget.insert = localized_text_insert
-
-        elif isinstance(widget, tk.Entry):
-            original_insert = widget.insert
-
-            def localized_entry_insert(index, value):
-                if isinstance(value, str):
-                    value = self._tr(value)
-                return original_insert(index, value)
-
-            widget.insert = localized_entry_insert
 
         if isinstance(widget, tk.Menu):
             original_add_command = widget.add_command
@@ -2230,6 +2227,9 @@ class ModManagerGUI(tk.Tk):
 
     def _localize_widget_tree(self, root):
         if self.language != "en":
+            return
+        # Workshop titles/descriptions and profile names are user-controlled data.
+        if getattr(root, "_bmm_skip_i18n", False):
             return
         try:
             if isinstance(root, (tk.Tk, tk.Toplevel)):
@@ -2265,7 +2265,7 @@ class ModManagerGUI(tk.Tk):
                     root.configure(text=translated)
             except (tk.TclError, AttributeError):
                 pass
-            if isinstance(root, ttk.Combobox):
+            if isinstance(root, ttk.Combobox) and root is not getattr(self, "profile_combo", None):
                 values = root.cget("values")
                 current = root.get()
                 translated_values = tuple(self._tr(value) for value in values)
@@ -3426,9 +3426,13 @@ class ModManagerGUI(tk.Tk):
         info.grid(row=0, column=1, sticky="nsew")
         info.columnconfigure(0, weight=1)
         title = str(item.get("title") or f"Workshop {mid}")
-        tk.Label(info, text=title, bg="#19232f", fg="#edf2f7",
-                 font=("Segoe UI", 10, "bold"), anchor="w", justify="left",
-                 wraplength=700).grid(row=0, column=0, sticky="we")
+        title_label = tk.Label(
+            info, text=title, bg="#19232f", fg="#edf2f7",
+            font=("Segoe UI", 10, "bold"), anchor="w", justify="left",
+            wraplength=700,
+        )
+        title_label._bmm_skip_i18n = True
+        title_label.grid(row=0, column=0, sticky="we")
         updated = int(item.get("time_updated", 0) or 0)
         try:
             date_text = datetime.fromtimestamp(updated).strftime("%d.%m.%Y") if updated else "дата неизвестна"
@@ -3438,22 +3442,41 @@ class ModManagerGUI(tk.Tk):
         creator_id = str(item.get("creator") or "")
         author_label = f"SteamID: {creator_id}" if creator_id.isdigit() else (creator_id or "автор не указан")
         tags = ", ".join(item.get("tags", [])[:4])
-        if item.get("is_collection"):
+        if self.language == "en":
+            date_text = self._tr(date_text)
+            author_label = self._tr(author_label)
+            if item.get("is_collection"):
+                meta_text = (
+                    f"COLLECTION  ·  ID {mid}  ·  {author_label}  ·  "
+                    f"items: {int(item.get('children_count', 0) or 0)}  ·  updated: {date_text}"
+                )
+            else:
+                meta_text = (
+                    f"ID {mid}  ·  {author_label}  ·  subscribers: {subs:,}  ·  "
+                    f"updated: {date_text}"
+                )
+        elif item.get("is_collection"):
             meta_text = f"КОЛЛЕКЦИЯ  ·  ID {mid}  ·  {author_label}  ·  элементов: {int(item.get('children_count', 0) or 0)}  ·  обновлена: {date_text}"
         else:
             meta_text = f"ID {mid}  ·  {author_label}  ·  подписок: {subs:,}  ·  обновлён: {date_text}"
         if tags:
             meta_text += f"  ·  {tags}"
-        tk.Label(info, text=meta_text, bg="#19232f", fg="#8fa2b8",
-                 font=("Segoe UI", 8), anchor="w", justify="left", wraplength=700).grid(
-            row=1, column=0, sticky="we", pady=(4, 4))
+        meta_label = tk.Label(
+            info, text=meta_text, bg="#19232f", fg="#8fa2b8",
+            font=("Segoe UI", 8), anchor="w", justify="left", wraplength=700,
+        )
+        meta_label._bmm_skip_i18n = True
+        meta_label.grid(row=1, column=0, sticky="we", pady=(4, 4))
         description = re.sub(r"\s+", " ", str(item.get("description", "") or "")).strip()
         if description:
             if len(description) > 360:
                 description = description[:357].rstrip() + "…"
-            tk.Label(info, text=description, bg="#19232f", fg="#c0cad6",
-                     font=("Segoe UI", 8), anchor="w", justify="left", wraplength=700).grid(
-                row=2, column=0, sticky="we", pady=(0, 6))
+            description_label = tk.Label(
+                info, text=description, bg="#19232f", fg="#c0cad6",
+                font=("Segoe UI", 8), anchor="w", justify="left", wraplength=700,
+            )
+            description_label._bmm_skip_i18n = True
+            description_label.grid(row=2, column=0, sticky="we", pady=(0, 6))
 
         actions = tk.Frame(card_frame, bg="#19232f")
         actions.grid(row=0, column=2, rowspan=4, sticky="e", padx=(12, 0))
