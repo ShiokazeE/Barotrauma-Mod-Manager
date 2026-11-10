@@ -14,7 +14,7 @@ echo.
 echo [2/4] Installing runtime and build dependencies...
 %PYTHON_CMD% -m pip install --upgrade pip
 if errorlevel 1 goto fail
-%PYTHON_CMD% -m pip install --upgrade requests Pillow pyinstaller
+%PYTHON_CMD% -m pip install --upgrade -r requirements.txt pyinstaller
 if errorlevel 1 goto fail
 
 echo.
@@ -37,18 +37,18 @@ echo.
 echo =============================================
 echo SUCCESS: BarotraumaModManager.exe was created.
 echo =============================================
-pause
+if not defined CI pause
 exit /b 0
 
 :need_python
 echo.
 echo ERROR: Python 3.10 or newer is required.
 echo Install Python and enable the PATH option, then run this file again.
-pause
+if not defined CI pause
 exit /b 1
 
 :fail
 echo.
 echo BUILD FAILED. Check the error messages above.
-pause
+if not defined CI pause
 exit /b 1
