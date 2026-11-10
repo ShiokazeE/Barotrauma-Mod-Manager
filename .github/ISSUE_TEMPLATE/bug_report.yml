@@ -1,0 +1,30 @@
+name: Bug report
+description: Report a reproducible problem
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Manager version
+      placeholder: 2.7.1
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed Steam API keys, account details and personal paths from logs.
+          required: true
