@@ -66,13 +66,16 @@ jobs:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && 'v2.7.1' || github.ref_name }}
           target_commitish: ${{ github.sha }}
           body: |
-            Workshop scrolling and resize hotfix.
+            Workshop scrolling, resize and bilingual interface update.
 
-            - Fixed mouse-wheel handling over Workshop card children and filtered scrolling to the Workshop results area.
-            - Added support for high-resolution wheel deltas and X11 wheel buttons.
-            - Debounced Canvas width and scroll-region recalculation during resize and card rendering.
+            - Fixed Workshop mouse-wheel handling and improved responsive resizing.
+            - Added Russian and English interface selection on first launch, saved locally on this PC.
+            - Added a header language switch and preserved existing mod profiles and Workshop names.
+            - Added an optional Boosty donation link. The manager remains free to use.
 
             **Windows package:** portable Windows x64 ZIP. Extract it and run `BarotraumaModManager.exe`.
+
+            Support development: https://boosty.to/shiokaze/single-payment/donation/841459/target?share=target_link
           draft: false
           prerelease: false
           make_latest: true
