@@ -15,6 +15,7 @@ Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma
 ## Возможности
 
 - Поиск модов и коллекций Steam Workshop через личный Steam Web API key.
+- Интерфейс на русском и английском языках: выбор при первом запуске, сохранение языка на этом ПК.
 - Скачивание модов в `LocalMods` и добавление в выбранный профиль.
 - Импорт коллекций, включая вложенные элементы.
 - Несколько профилей, копирование и переключение между ними.
@@ -34,6 +35,10 @@ Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma
 Открой **[GitHub Releases](https://github.com/ShiokazeE/Barotrauma-Mod-Manager/releases)**, скачай ZIP для Windows, распакуй его и запусти `BarotraumaModManager.exe`.
 
 Распакуй архив и запусти `BarotraumaModManager.exe`. Профили, SteamCMD и зашифрованный API-ключ хранятся в пользовательской папке данных Windows, а не рядом с EXE.
+
+## Язык интерфейса
+
+При первом запуске выбери **Русский** или **English**. Выбор сохраняется в локальном `language.json`, отдельно от профилей модов. Позже язык можно поменять кнопкой **RU / EN** в заголовке приложения; для применения потребуется перезапустить менеджер.
 
 ## Запуск из исходников
 
@@ -87,6 +92,12 @@ GitHub Actions также умеет собирать Windows EXE при отп�
 py -3 tests/test_barotrauma_mod_manager.py
 ```
 
+Проверка переводов и сохранения языка:
+
+```powershell
+py -3 tests/test_localization.py
+```
+
 Проверка прокрутки Workshop и изменения размера окна (нужна графическая сессия Windows):
 
 ```powershell
@@ -110,3 +121,7 @@ py -3 tests/test_workshop_gui_hotfix.py
 ## Отказ от ответственности
 
 Это неофициальный инструмент сообщества. Проект не связан с FakeFish, Daedalic Entertainment или Valve. Barotrauma и Steam являются товарными знаками соответствующих владельцев.
+
+## Поддержать проект
+
+Barotrauma Mod Manager остаётся бесплатным. Если проект оказался полезен, его разработку можно добровольно поддержать через [Boosty](https://boosty.to/shiokaze/single-payment/donation/841459/target?share=target_link). Донаты не открывают платные функции.
