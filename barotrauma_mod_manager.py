@@ -2282,6 +2282,8 @@ class ModManagerGUI(tk.Tk):
                 if current and current != translated_current:
                     root.delete(0, tk.END)
                     root.insert(0, translated_current)
+                # Entry widgets become user input fields after their initial placeholder.
+                root._bmm_skip_i18n = True
             for child in root.winfo_children():
                 self._localize_widget_tree(child)
         except tk.TclError:
