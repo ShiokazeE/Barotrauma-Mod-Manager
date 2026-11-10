@@ -38,5 +38,8 @@ jobs:
       - name: Run core regression tests
         run: python tests/test_barotrauma_mod_manager.py
 
+      - name: Run localization tests
+        run: python tests/test_localization.py
+
       - name: Run Workshop GUI regression tests
         run: python tests/test_workshop_gui_hotfix.py
