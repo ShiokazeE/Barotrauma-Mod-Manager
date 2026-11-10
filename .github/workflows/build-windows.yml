@@ -62,7 +62,20 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
+          name: Barotrauma Mod Manager ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          body: |
+            Workshop scrolling and resize hotfix.
+
+            - Fixed mouse-wheel handling over Workshop card children and filtered scrolling to the Workshop results area.
+            - Added support for high-resolution wheel deltas and X11 wheel buttons.
+            - Debounced Canvas width and scroll-region recalculation during resize and card rendering.
+
+            **Windows package:** portable Windows x64 ZIP. Extract it and run `BarotraumaModManager.exe`.
+          draft: false
+          prerelease: false
+          make_latest: true
           files: |
             Barotrauma-Mod-Manager-Windows.zip
             SHA256SUMS.txt
-          generate_release_notes: true
+          generate_release_notes: false
