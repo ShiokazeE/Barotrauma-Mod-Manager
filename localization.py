@@ -50,17 +50,28 @@ _EN = {
     "СТАТУС": "STATUS",
     "ГРУППА": "GROUP",
     "МОД": "MOD",
+    "Только субмарины": "Submarine only",
+    "Исправления и производительность": "Fixes & performance",
+    "Совместимость и патчи": "Compatibility & patches",
+    "Крупные модификации": "Major overhauls",
+    "Обычный контент": "Regular content",
     "Открыть в Steam Workshop": "Open in Steam Workshop",
     "Проверить XML-конфликты": "Check XML conflicts",
     "Удалить мод…": "Remove mod…",
     "ЖУРНАЛ ОПЕРАЦИЙ": "ACTIVITY LOG",
     "Моды": "Mods",
+    "НАЙТИ МОДЫ": "SEARCH MODS",
+    "НАЙТИ КОЛЛЕКЦИИ / МОДПАКИ": "SEARCH COLLECTIONS / MOD PACKS",
     "Коллекции / модпаки": "Collections / mod packs",
     "Популярные": "Most popular",
     "По релевантности": "Relevance",
     "По рейтингу": "Top rated",
     "Новые": "Newest",
     "Недавно обновлённые": "Recently updated",
+    "Каталог: моды. Выполни поиск.": "Catalog: mods. Start a search.",
+    "Каталог: коллекции / модпаки. Выполни поиск.": "Catalog: collections / mod packs. Start a search.",
+    "Ищу моды в Steam Workshop…": "Searching for mods in Steam Workshop…",
+    "Ищу коллекции в Steam Workshop…": "Searching for collections in Steam Workshop…",
     "НАЙТИ": "SEARCH",
     "Введи личный Steam Web API key, чтобы искать моды и коллекции.": "Add your personal Steam Web API key to search for mods and collections.",
     "Поиск только по Barotrauma. Скачивание проверяет пакет и добавляет его в активный профиль.": "Search is limited to Barotrauma. Downloads are validated and added to the active profile.",
@@ -91,6 +102,7 @@ _EN = {
     "Ничего не найдено. Попробуй изменить запрос.": "No results found. Try changing your search.",
     "дата неизвестна": "date unknown",
     "автор не указан": "author not provided",
+    "Не удалось безопасно сохранить ключ: ": "Could not store the key securely: ",
 
     # Steam API key dialog
     "ЛИЧНЫЙ STEAM WEB API KEY": "PERSONAL STEAM WEB API KEY",
@@ -179,6 +191,7 @@ _EN = {
     "Конфликтов не обнаружено.\n": "No conflicts found.\n",
     "Профиль применен в config_player.xml!": "Profile applied to config_player.xml!",
     "Файл сохранён:\n": "File saved:\n",
+    "Ключ должен содержать 32 шестнадцатеричных символа.": "The key must contain 32 hexadecimal characters.",
     "Импорт завершён": "Import complete",
     "Ошибка импорта": "Import error",
 
@@ -251,12 +264,13 @@ _EN = {
 # These replacements are intentionally specific: they translate generated status/log
 # messages without translating arbitrary Workshop titles, descriptions or profile names.
 _FRAGMENTS = (
-    ("НАЙТИ ", "SEARCH "),
-    ("КОЛЛЕКЦИИ / МОДПАКИ", "COLLECTIONS / MOD PACKS"),
-    ("коллекции / модпаки", "collections / mod packs"),
-    ("моды", "mods"),
     ("Каталог: ", "Catalog: "),
     (". Выполни поиск.", ". Start a search."),
+    ("ИГРА НАЙДЕНА", "GAME FOUND"),
+    ("ВЫБЕРИ ПАПКУ ИГРЫ", "SELECT GAME FOLDER"),
+    ("STEAMCMD ГОТОВ", "STEAMCMD READY"),
+    ("STEAMCMD НЕ НАЙДЕН", "STEAMCMD NOT FOUND"),
+    ("Не удалось безопасно сохранить ключ: ", "Could not store the key securely: "),
     ("[ОШИБКА профилей]", "[PROFILE ERROR]"),
     ("[ОШИБКА SteamCMD]", "[STEAMCMD ERROR]"),
     ("[ОШИБКА LuaCs]", "[LUACS ERROR]"),
@@ -294,10 +308,8 @@ _FRAGMENTS = (
     ("изолированных загрузчика", "isolated workers"),
     ("Повторно использован изолированный кэш.", "Reused isolated cache."),
     ("Установлен:", "Installed:"),
-    ("Ищу ", "Searching for "),
     ("Найдено ", "Found "),
     ("модов", "mods"),
-    ("коллекции", "collections"),
     ("дата неизвестна", "date unknown"),
     ("автор не указан", "author not provided"),
     ("КОЛЛЕКЦИЯ  ·  ID ", "COLLECTION  ·  ID "),
@@ -310,7 +322,6 @@ _FRAGMENTS = (
     (" шт.:", " item(s):"),
     ("Проверка завершена: загружаемых обновлений не найдено.", "Check complete: no downloadable updates were found."),
     ("Установленные моды актуальны.", "All installed mods are up to date."),
-    ("Для ", "For "),
     (" модов Steam не отдал достаточно данных для сравнения.", " mods, Steam did not provide enough data for comparison."),
     ("Импортировано модов: ", "Mods imported: "),
     ("Пока не найдено локальных файлов: ", "Local files not found yet: "),
@@ -385,7 +396,6 @@ def choose_language(root: tk.Tk, path: Path) -> str:
     dialog.geometry("460x255")
     dialog.resizable(False, False)
     dialog.configure(bg="#0d131b")
-    dialog.transient(root)
 
     panel = tk.Frame(
         dialog, bg="#151e29", padx=24, pady=20,
