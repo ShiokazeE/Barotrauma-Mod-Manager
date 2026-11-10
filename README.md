@@ -23,6 +23,7 @@ Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma
 ## Features
 
 - **Workshop browser** — search Barotrauma Workshop items and collections using your own Steam Web API key.
+- **Bilingual interface** — choose Russian or English on first launch; the preference is saved on this PC.
 - **One-click install** — download a Workshop item into `LocalMods`, then add it to the selected profile.
 - **Collection import** — expand nested collections and resolve available Workshop metadata.
 - **Multiple profiles** — create, copy, switch and remove mod profiles.
@@ -42,6 +43,10 @@ Screenshots of the actual Windows application will be added separately. The down
 Download the latest Windows ZIP from **[GitHub Releases](https://github.com/ShiokazeE/Barotrauma-Mod-Manager/releases)**, extract it, and run `BarotraumaModManager.exe`.
 
 The release package is intended to be portable: extract it and run `BarotraumaModManager.exe`. The manager stores profiles, SteamCMD data and the encrypted API key in the current user's application-data directory, not beside the executable.
+
+## Interface language
+
+Choose **Russian** or **English** when the manager starts for the first time. The choice is saved locally in `language.json`, separately from mod profiles. Use the **RU / EN** button in the header to change the language; restart the manager to apply it.
 
 ## Run from source
 
@@ -95,6 +100,12 @@ Run the core regression script:
 py -3 tests/test_barotrauma_mod_manager.py
 ```
 
+Run the localization regression tests:
+
+```powershell
+py -3 tests/test_localization.py
+```
+
 Run the Tkinter Workshop scroll/resize smoke test on a desktop Windows session:
 
 ```powershell
@@ -123,3 +134,7 @@ No open-source license has been selected yet. Until a license file is added, all
 ## Disclaimer
 
 This is an unofficial community tool. It is not affiliated with, endorsed by, or sponsored by FakeFish, Daedalic Entertainment or Valve. Barotrauma and Steam are trademarks of their respective owners.
+
+## Support the project
+
+Barotrauma Mod Manager is free to use. If it is useful to you, you can support continued development with a voluntary donation on [Boosty](https://boosty.to/shiokaze/single-payment/donation/841459/target?share=target_link). Donations do not unlock paid features.
