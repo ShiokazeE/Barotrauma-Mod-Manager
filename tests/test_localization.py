@@ -22,6 +22,8 @@ class LocalizationTests(unittest.TestCase):
     def test_russian_and_unknown_text_are_preserved(self):
         self.assertEqual(translate("МОИ ПРОФИЛИ", "ru"), "МОИ ПРОФИЛИ")
         self.assertEqual(translate("Custom Workshop title", "en"), "Custom Workshop title")
+        self.assertEqual(translate("Название модов и коллекции", "en"), "Название модов и коллекции")
+        self.assertEqual(translate("Модпак: дата неизвестна", "en"), "Модпак: дата неизвестна")
 
     def test_language_preference_is_saved_and_loaded(self):
         with tempfile.TemporaryDirectory() as temp_dir:
