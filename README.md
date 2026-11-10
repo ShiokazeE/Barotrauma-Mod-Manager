@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="assets/banner.png" alt="Barotrauma Mod Manager banner" width="100%">
-  <h1>Barotrauma Mod Manager</h1>
+  <img src="assets/logo.svg" alt="Barotrauma Mod Manager" width="96">
+<h1>Barotrauma Mod Manager</h1>
   <p><strong>A desktop Workshop and load-order manager for Barotrauma.</strong></p>
   <p>
     <a href="README.ru.md">Русский</a> · <a href="README.zh-CN.md">简体中文</a>
