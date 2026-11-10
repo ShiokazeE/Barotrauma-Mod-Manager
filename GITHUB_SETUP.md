@@ -1,38 +1,55 @@
-# One-time GitHub setup
+# Repository maintainer checklist
 
-The repository contents are prepared for `ShiokazeE/Barotrauma-Mod-Manager`.
+This repository is already created at [ShiokazeE/Barotrauma-Mod-Manager](https://github.com/ShiokazeE/Barotrauma-Mod-Manager). This document covers the remaining one-time project settings and release procedure.
 
-## Create the empty repository
+## Repository description
 
-1. Open https://github.com/new
-2. Repository name: `Barotrauma-Mod-Manager`
-3. Description: `A desktop Steam Workshop and load-order manager for Barotrauma.`
-4. Choose **Public**.
-5. Enable **Add a README file** so GitHub creates the initial `main` branch.
-6. Do not select a license yet; the project owner has not chosen one.
-7. Create repository and share its URL with the maintainer/assistant.
+Suggested About description:
 
-The connected GitHub integration can then add and update text files, workflow definitions and documentation on the default branch. Binary screenshot assets can be uploaded from this prepared folder if required.
-
-## Repository About section
-
-Suggested description:
-
-`A desktop Steam Workshop and load-order manager for Barotrauma. Browse mods and collections, install content, and manage author load-order presets.`
+> A desktop Steam Workshop and load-order manager for Barotrauma. Browse mods and collections, install content, and manage author load-order presets.
 
 Suggested topics:
 
-`barotrauma`, `mod-manager`, `steam-workshop`, `python`, `windows`, `gaming`, `tkinter`
+- `barotrauma`
+- `mod-manager`
+- `steam-workshop`
+- `python`
+- `windows`
+- `gaming`
+- `tkinter`
 
-## Enable the project website
+## GitHub Pages
 
-After the repository files have been added:
+The landing page is in `docs/`.
 
 1. Open **Settings → Pages**.
 2. Under **Build and deployment**, choose **Deploy from a branch**.
-3. Choose branch `main` and folder `/docs`.
-4. Save. GitHub Pages will publish `https://shiokazee.github.io/Barotrauma-Mod-Manager/` after deployment completes.
+3. Select branch `main` and folder `/docs`.
+4. Save and wait for the Pages deployment check to complete.
+
+Expected URL: https://shiokazee.github.io/Barotrauma-Mod-Manager/
+
+The site links to the README files in GitHub because the repository root is not part of the published `/docs` folder.
+
+## Actions permissions
+
+The Windows release workflow requests only `contents: write`, which is required to publish a GitHub Release from a version tag. CI uses `contents: read`.
+
+Keep **Settings → Actions → General → Workflow permissions** at the least-privilege level that permits the workflow to run. Do not add secrets for Steam: the build does not need a Steam API key.
 
 ## First Windows release
 
-After a Windows build has been tested, create and push a version tag such as `v2.7.1`. The workflow in `.github/workflows/build-windows.yml` builds the executable and creates a GitHub Release for version tags.
+Do not publish a release until a Windows executable has been built and smoke-tested.
+
+1. Run the **Build Windows** workflow manually from the reviewed branch.
+2. Download the `Barotrauma-Mod-Manager-Windows` artifact and test it on a clean Windows account or machine.
+3. Verify startup, Workshop configuration, SteamCMD bootstrap, install/update/remove, profile switching, ModLists XML import/export, and applying a profile to the game.
+4. After the tested commit is merged to `main`, create a version tag such as `v2.7.1` on that commit.
+5. Pushing the tag builds the portable ZIP and publishes the GitHub Release.
+
+## Project policy
+
+- Keep the application free to use; donations are voluntary and must not unlock core features.
+- Do not commit API keys, user profile JSON, DPAPI files, SteamCMD caches, LocalMods or game configuration files.
+- Keep the license unset until the project owner explicitly chooses licensing terms.
+- Add screenshots only when they are captured from the real application.
