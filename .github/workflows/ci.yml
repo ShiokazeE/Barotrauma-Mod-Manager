@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "setup/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Regression tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install runtime dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Compile application and tests
+        run: python -m compileall -q barotrauma_mod_manager.py tests
+
+      - name: Run core regression tests
+        run: python tests/test_barotrauma_mod_manager.py
+
+      - name: Run Workshop GUI regression tests
+        run: python tests/test_workshop_gui_hotfix.py

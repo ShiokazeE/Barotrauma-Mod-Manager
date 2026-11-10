@@ -1,0 +1,112 @@
+<div align="center">
+  <img src="assets/logo.svg" alt="Barotrauma Mod Manager" width="96">
+  <h1>Barotrauma Mod Manager</h1>
+  <p><strong>Менеджер Steam Workshop и порядка загрузки модов для Barotrauma.</strong></p>
+  <p><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a></p>
+  <p><a href="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/actions/workflows/ci.yml"><img src="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a></p>
+</div>
+
+Barotrauma Mod Manager помогает искать моды и коллекции в Steam Workshop, устанавливать их в `LocalMods`, управлять отдельными профилями и применять выбранный порядок загрузки в игре.
+
+> **Статус проекта:** любительский проект в активной разработке. Текущая версия исходников — 2.7.1. Проверенный Windows EXE будет опубликован в GitHub Releases после тестирования сборки на Windows.
+
+Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma-Mod-Manager/) · Source code: [GitHub repository](https://github.com/ShiokazeE/Barotrauma-Mod-Manager)
+
+## Возможности
+
+- Поиск модов и коллекций Steam Workshop через личный Steam Web API key.
+- Скачивание модов в `LocalMods` и добавление в выбранный профиль.
+- Импорт коллекций, включая вложенные элементы.
+- Несколько профилей, копирование и переключение между ними.
+- Ручное управление порядком, осторожная автосортировка.
+- Импорт и экспорт родных `ModLists/*.xml` с сохранением авторского порядка.
+- Проверка обновлений и загрузка новых версий.
+- Поиск возможных XML-конфликтов.
+- Установка клиентского патча LuaCs с резервной копией и откатом.
+- Защита распаковки архивов и резервное копирование конфигурации игры.
+
+## Скриншот
+
+Скриншоты настоящего интерфейса появятся после проверки Windows-сборки. Мы не используем демонстрационные изображения, которые могут вводить пользователей в заблуждение.
+
+## Скачать
+
+Открой **[GitHub Releases](https://github.com/ShiokazeE/Barotrauma-Mod-Manager/releases)** и скачай последний проверенный пакет для Windows, когда он будет опубликован.
+
+Распакуй архив и запусти `BarotraumaModManager.exe`. Профили, SteamCMD и зашифрованный API-ключ хранятся в пользовательской папке данных Windows, а не рядом с EXE.
+
+## Запуск из исходников
+
+Нужны Windows 10/11 и Python 3.10 или новее.
+
+```powershell
+py -3 -m pip install -r requirements.txt
+py -3 barotrauma_mod_manager.py
+```
+
+Pillow используется для отображения превью Workshop. Без него поиск и скачивание могут работать без изображений.
+
+## Сборка EXE
+
+1. Установи Python 3.10+ и включи Python Launcher (`py`).
+2. Оставь `barotrauma_mod_manager.py` и `build_exe.bat` в одной папке.
+3. Запусти `build_exe.bat`.
+4. Скрипт создаст `BarotraumaModManager.exe` рядом с BAT-файлом.
+
+GitHub Actions также умеет собирать Windows EXE при отправке тега `v*`. Подробности — в [workflow сборки](.github/workflows/build-windows.yml).
+
+## Steam Web API key
+
+Поиск Workshop использует `IPublishedFileService/QueryFiles`. Введи собственный Steam Web API key в настройках мастерской. В Windows ключ шифруется через DPAPI и не сохраняется в репозитории или JSON профилей.
+
+- [Документация IPublishedFileService](https://partner.steamgames.com/doc/webapi/IPublishedFileService)
+- [Документация ISteamRemoteStorage](https://partner.steamgames.com/doc/webapi/ISteamRemoteStorage)
+
+**Не загружай в Git API-ключ, файл профилей, кэш SteamCMD или папку игры.** Типичные локальные данные исключены через `.gitignore`.
+
+## Загрузка модов
+
+Менеджер использует кэш клиента Steam, если мод уже загружен; затем пробует доступный URL Steam CDN и при необходимости переключается на SteamCMD. Steam не предоставляет прямую ссылку на файл каждого Workshop-мода. Менеджер не обходит ограничения доступа, подписки, приватности или владения.
+
+Для больших коллекций доступны до трёх изолированных процессов SteamCMD с отдельными кэшами. Большее количество загрузчиков не гарантирует пропорционального ускорения.
+
+## Порядок загрузки и XML Barotrauma
+
+Менеджер разделяет два формата:
+
+- **`Barotrauma/ModLists/<preset>.xml`** — авторский пресет для распространения: `<mods>`, `<Vanilla />` и упорядоченные элементы `<Workshop ... />`. Импорт сохраняет исходную последовательность, экспорт создаёт файл того же формата.
+- **`config_player.xml`** — локальная активная конфигурация игры. При применении профиля менеджер записывает упорядоченные `<package path="LocalMods/<ID>/filelist.xml" />` в `contentpackages/regularpackages`, предварительно создавая резервную копию.
+
+Авторский порядок важнее общей эвристики. Автосортировка консервативна, сохраняет относительный порядок модов внутри групп и ставит Lua For Barotrauma (`2559634234`) первым, если он присутствует. Всегда проверяй предпросмотр и учитывай особые указания автора мода.
+
+## Тесты
+
+Основные регрессионные тесты:
+
+```powershell
+py -3 tests/test_barotrauma_mod_manager.py
+```
+
+Проверка прокрутки Workshop и изменения размера окна (нужна графическая сессия Windows):
+
+```powershell
+py -3 tests/test_workshop_gui_hotfix.py
+```
+
+Тесты используют временные каталоги и имитацию ответов Steam; реальные загрузки из Workshop не выполняются.
+
+## Сообщить об ошибке
+
+В отчёте укажи версию менеджера, версию Windows, последовательность действий и соответствующие строки журнала. **Перед отправкой удали API-ключи, данные аккаунта и другую личную информацию.**
+
+## Участие в разработке
+
+Сообщения об ошибках и небольшие Pull Request приветствуются. Перед отправкой изменений прочитай [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Лицензия
+
+Лицензия открытого исходного кода пока не выбрана. До добавления файла лицензии все права остаются у правообладателя; публичная видимость репозитория сама по себе не разрешает распространять или публиковать изменённые версии. Условия лицензии будут добавлены после подтверждения владельцем проекта.
+
+## Отказ от ответственности
+
+Это неофициальный инструмент сообщества. Проект не связан с FakeFish, Daedalic Entertainment или Valve. Barotrauma и Steam являются товарными знаками соответствующих владельцев.

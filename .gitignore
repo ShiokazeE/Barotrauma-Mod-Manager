@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.log
+baro_profiles.json
+*.enc
+steamcmd/
+SteamCMD/
+LocalMods/
+ModLists/
+config_player.xml
+*.spec
+build/
+dist/
