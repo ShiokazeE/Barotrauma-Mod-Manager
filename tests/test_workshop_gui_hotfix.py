@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 SOURCE = PROJECT_ROOT / "barotrauma_mod_manager.py"
 
 if not SOURCE.is_file():
@@ -23,6 +25,9 @@ with tempfile.TemporaryDirectory() as config_dir, tempfile.TemporaryDirectory() 
     mod = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
+
+    # Avoid the first-run modal picker; localization.py has dedicated persistence tests.
+    mod.save_language(mod.LANGUAGE_FILE, "ru")
 
     # Avoid network-dependent SteamCMD setup in this isolated GUI smoke test.
     mod.ModManagerGUI._bootstrap_steamcmd_background = lambda self: None
