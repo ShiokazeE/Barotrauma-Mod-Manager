@@ -1,2 +1,87 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1118"><meta name="description" content="Barotrauma Mod Manager — Steam Workshop search, downloads and load-order profiles."><title>Barotrauma Mod Manager</title><style>*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 15% 0,#173047 0,transparent 45%),#0b1118;color:#e5edf5;font:16px/1.65 Inter,Segoe UI,Arial,sans-serif}.wrap{max-width:960px;margin:auto;padding:64px 24px}.hero{padding:54px 0 42px}.logo{width:76px;height:76px}.eyebrow{color:#7dd3fc;text-transform:uppercase;letter-spacing:.16em;font-size:12px;font-weight:700}h1{font-size:clamp(38px,7vw,68px);line-height:1.05;margin:20px 0}p{color:#aebdcb;max-width:690px}.actions{display:flex;gap:12px;flex-wrap:wrap;margin:28px 0}.btn{padding:12px 18px;border-radius:12px;text-decoration:none;color:#07121b;background:#7dd3fc;font-weight:700}.btn.alt{background:#1d2a38;color:#e5edf5;border:1px solid #33475b}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:32px}.card{background:#111c27;border:1px solid #243546;border-radius:16px;padding:22px}.card h2{font-size:18px;margin:0 0 8px}.card p{font-size:14px;margin:0}.langs{margin-top:36px;color:#8093a5;font-size:14px}a{color:#7dd3fc}.foot{margin-top:56px;border-top:1px solid #243546;padding-top:20px;color:#72869a;font-size:13px}</style></head><body><main class="wrap"><section class="hero"><img class="logo" src="../assets/logo.svg" alt=""><div class="eyebrow">Community project · Windows</div><h1>Barotrauma<br>Mod Manager</h1><p>Find Workshop mods and collections, install them into LocalMods, organize profiles and apply load orders — with author ModLists XML support.</p><div class="actions"><a class="btn" href="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/releases">Download latest release</a><a class="btn alt" href="https://github.com/ShiokazeE/Barotrauma-Mod-Manager">View source on GitHub</a></div></section><section class="grid"><article class="card"><h2>Workshop browser</h2><p>Search mods and collections with your own Steam Web API key.</p></article><article class="card"><h2>Profiles & load order</h2><p>Keep multiple setups, preserve author order and preview conservative sorting.</p></article><article class="card"><h2>XML compatibility</h2><p>Import and export Barotrauma ModLists presets separately from the active game config.</p></article><article class="card"><h2>Free & community-driven</h2><p>The manager is free to use. Contributions and voluntary support help development.</p></article></section><div class="langs">Read the documentation: <a href="../README.md">English</a> · <a href="../README.ru.md">Русский</a> · <a href="../README.zh-CN.md">简体中文</a></div><footer class="foot">Unofficial community tool. Not affiliated with FakeFish, Daedalic Entertainment or Valve.</footer></main></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1118">
+  <meta name="description" content="Barotrauma Mod Manager — browse Steam Workshop, install mods and manage Barotrauma load-order profiles.">
+  <meta property="og:title" content="Barotrauma Mod Manager">
+  <meta property="og:description" content="A free desktop Workshop and load-order manager for Barotrauma.">
+  <title>Barotrauma Mod Manager</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1118; --panel:#111c27; --line:#263747; --text:#e5edf5; --muted:#a9b9c8; --cyan:#7dd3fc; --green:#70e0b2; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:radial-gradient(ellipse at 12% 0,#17364c 0,transparent 42%),radial-gradient(ellipse at 90% 38%,#12332c 0,transparent 36%),var(--bg); color:var(--text); font:16px/1.65 Inter,Segoe UI,Arial,sans-serif; }
+    a { color:var(--cyan); }
+    .wrap { width:min(100% - 40px,1040px); margin:0 auto; padding:36px 0 28px; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:4px 0 28px; border-bottom:1px solid #ffffff14; }
+    .brand { display:flex; align-items:center; gap:12px; color:var(--text); text-decoration:none; font-weight:700; letter-spacing:.01em; }
+    .logo { width:42px; height:42px; }
+    nav { display:flex; flex-wrap:wrap; gap:18px; font-size:14px; }
+    nav a { color:var(--muted); text-decoration:none; }
+    nav a:hover { color:var(--cyan); }
+    .hero { padding:78px 0 66px; max-width:790px; }
+    .eyebrow { color:var(--green); text-transform:uppercase; letter-spacing:.17em; font-size:12px; font-weight:800; }
+    h1 { font-size:clamp(42px,8vw,76px); line-height:1.02; letter-spacing:-.045em; margin:18px 0 22px; }
+    .lead { max-width:720px; color:var(--muted); font-size:clamp(17px,2.3vw,20px); }
+    .actions { display:flex; flex-wrap:wrap; gap:12px; margin:30px 0 0; }
+    .btn { display:inline-flex; align-items:center; justify-content:center; min-height:46px; padding:10px 17px; border-radius:11px; background:var(--cyan); color:#06131b; font-weight:800; text-decoration:none; }
+    .btn.alt { background:#172633; border:1px solid #385064; color:var(--text); }
+    .status { display:flex; align-items:center; gap:10px; margin-top:24px; color:var(--muted); font-size:13px; }
+    .dot { width:8px; height:8px; border-radius:50%; background:#e7b96c; box-shadow:0 0 0 4px #e7b96c1f; }
+    .section-title { margin:0 0 16px; font-size:22px; letter-spacing:-.02em; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; }
+    .card { background:linear-gradient(145deg,#14212d,#101923); border:1px solid var(--line); border-radius:16px; padding:22px; }
+    .card h3 { margin:0 0 7px; font-size:17px; }
+    .card p { color:var(--muted); font-size:14px; margin:0; }
+    .bottom { margin-top:52px; padding-top:24px; border-top:1px solid #ffffff14; display:flex; flex-wrap:wrap; justify-content:space-between; gap:16px; color:#8295a7; font-size:13px; }
+    .langs { display:flex; gap:14px; }
+    @media (max-width:600px) { .wrap{width:min(100% - 28px,1040px)} header{align-items:flex-start;flex-direction:column} .hero{padding:54px 0 48px} }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <a class="brand" href="./">
+        <img class="logo" src="assets/logo.svg" alt="">
+        <span>Barotrauma Mod Manager</span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="#features">Features</a>
+        <a href="https://github.com/ShiokazeE/Barotrauma-Mod-Manager">Source</a>
+        <a href="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/issues">Issues</a>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <div class="eyebrow">Free community project · Windows</div>
+      <h1>Manage your<br>Barotrauma mods.</h1>
+      <p class="lead">Browse Steam Workshop mods and collections, install content into LocalMods, organize profiles and apply load orders — with support for author-created ModLists XML presets.</p>
+      <div class="actions">
+        <a class="btn" href="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/releases">Download / Releases</a>
+        <a class="btn alt" href="https://github.com/ShiokazeE/Barotrauma-Mod-Manager">View source</a>
+      </div>
+      <div class="status"><span class="dot" aria-hidden="true"></span><span>Windows release is published only after a build has been tested.</span></div>
+    </section>
+
+    <section id="features" aria-labelledby="features-title">
+      <h2 class="section-title" id="features-title">Built for modded campaigns</h2>
+      <div class="grid">
+        <article class="card"><h3>Workshop browser</h3><p>Search mods and collections with your own Steam Web API key, then open the Workshop page or install directly.</p></article>
+        <article class="card"><h3>Profiles & load order</h3><p>Keep separate setups, move mods manually and preview conservative automatic sorting.</p></article>
+        <article class="card"><h3>Author XML presets</h3><p>Import and export native Barotrauma ModLists files while preserving the author's sequence.</p></article>
+        <article class="card"><h3>Safer changes</h3><p>Backups, guarded archive extraction and separate local game configuration help protect your setup.</p></article>
+      </div>
+    </section>
+
+    <footer class="bottom">
+      <div>Unofficial community tool. Not affiliated with FakeFish, Daedalic Entertainment or Valve.</div>
+      <div class="langs">
+        <a href="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/blob/main/README.md">English</a>
+        <a href="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/blob/main/README.ru.md">Русский</a>
+        <a href="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/blob/main/README.zh-CN.md">简体中文</a>
+      </div>
+    </footer>
+  </main>
+</body>
+</html>
