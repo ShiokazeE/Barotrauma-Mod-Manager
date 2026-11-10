@@ -15,6 +15,9 @@ SUPPORTED_LANGUAGES = ("ru", "en")
 _EN = {
     # Main window and navigation
     "MOD MANAGER  ·  ПРОФИЛИ И WORKSHOP": "MOD MANAGER  ·  PROFILES & WORKSHOP",
+    "Сменить язык": "Change language",
+    "Не удалось сохранить настройки языка: ": "Could not save language settings: ",
+
     "Проверка путей…": "Checking paths…",
     "⚙ НАСТРОЙКИ": "⚙ SETTINGS",
     "✕ ЗАКРЫТЬ НАСТРОЙКИ": "✕ CLOSE SETTINGS",
@@ -248,6 +251,12 @@ _EN = {
 # These replacements are intentionally specific: they translate generated status/log
 # messages without translating arbitrary Workshop titles, descriptions or profile names.
 _FRAGMENTS = (
+    ("НАЙТИ ", "SEARCH "),
+    ("КОЛЛЕКЦИИ / МОДПАКИ", "COLLECTIONS / MOD PACKS"),
+    ("коллекции / модпаки", "collections / mod packs"),
+    ("моды", "mods"),
+    ("Каталог: ", "Catalog: "),
+    (". Выполни поиск.", ". Start a search."),
     ("[ОШИБКА профилей]", "[PROFILE ERROR]"),
     ("[ОШИБКА SteamCMD]", "[STEAMCMD ERROR]"),
     ("[ОШИБКА LuaCs]", "[LUACS ERROR]"),
