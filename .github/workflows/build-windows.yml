@@ -8,29 +8,50 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
+    name: Build portable Windows executable
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - name: Install dependencies
+          cache: pip
+
+      - name: Install runtime dependencies
         run: python -m pip install -r requirements.txt
+
       - name: Build executable
-        run: ./build_exe.bat
+        shell: cmd
+        run: build_exe.bat
+
       - name: Package portable release
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force release | Out-Null
-          Copy-Item dist/BarotraumaModManager/BarotraumaModManager.exe release/ -ErrorAction SilentlyContinue
-          if (-not (Test-Path release/BarotraumaModManager.exe)) {
-            Copy-Item BarotraumaModManager.exe release/ -ErrorAction Stop
-          }
-          Compress-Archive -Path release/BarotraumaModManager.exe -DestinationPath Barotrauma-Mod-Manager-Windows.zip -Force
+          Copy-Item .\BarotraumaModManager.exe .\release\BarotraumaModManager.exe -ErrorAction Stop
+          Compress-Archive -Path .\release\BarotraumaModManager.exe -DestinationPath .\Barotrauma-Mod-Manager-Windows.zip -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: Barotrauma-Mod-Manager-Windows
+          path: Barotrauma-Mod-Manager-Windows.zip
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v3
         with:
           files: Barotrauma-Mod-Manager-Windows.zip
           generate_release_notes: true
