@@ -6,6 +6,7 @@ import threading
 import time
 import zipfile
 from pathlib import Path
+import sys
 
 # Keep application state out of the user's real profile during tests.
 with tempfile.TemporaryDirectory() as config_tmp:
