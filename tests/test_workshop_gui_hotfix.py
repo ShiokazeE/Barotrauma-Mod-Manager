@@ -27,7 +27,7 @@ with tempfile.TemporaryDirectory() as config_dir, tempfile.TemporaryDirectory() 
     spec.loader.exec_module(mod)
 
     # Avoid the first-run modal picker; localization.py has dedicated persistence tests.
-    mod.save_language(mod.LANGUAGE_FILE, "ru")
+    mod.save_language(mod.LANGUAGE_FILE, "en")
 
     # Avoid network-dependent SteamCMD setup in this isolated GUI smoke test.
     mod.ModManagerGUI._bootstrap_steamcmd_background = lambda self: None
@@ -38,10 +38,22 @@ with tempfile.TemporaryDirectory() as config_dir, tempfile.TemporaryDirectory() 
         app.notebook.select(app.workshop_tab)
         app.update_idletasks()
 
+        # Exercise the English widget pass and make sure internal values stay stable.
+        assert app.language == "en"
+        assert app.notebook.tab(app.profile_tab, "text").strip() == "MY PROFILES"
+        assert app.profile_combo.get() == "Main"
+        assert app.workshop_type_combo.get() == "Mods"
+        assert app.workshop_sort_combo.get() == "Most popular"
+        assert app._workshop_sort_code(app.workshop_sort_combo.get()) == "popular"
+        assert app.mod_context_menu.entrycget(0, "label") == "Open in Steam Workshop"
+        app._on_workshop_type_changed()
+        assert app.workshop_search_btn.cget("text") == "SEARCH MODS"
+        assert app.workshop_status_var.get() == "Catalog: mods. Start a search."
+
         dummy = [
             {
                 "id": str(1_000_000_000 + index),
-                "title": f"Test Workshop Item {index}",
+                "title": "Название модов и коллекции" if index == 0 else f"Test Workshop Item {index}",
                 "description": (
                     "Description used to create enough content to scroll and test "
                     "responsive geometry. " * 2
