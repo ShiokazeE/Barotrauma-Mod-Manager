@@ -3278,19 +3278,57 @@ class ModManagerGUI(tk.Tk):
         dialog.resizable(False, False)
         dialog.transient(self)
         dialog.grab_set()
-        dialog.geometry("520x215")
+        dialog.geometry("560x235")
 
         tk.Label(dialog, text="ЛИЧНЫЙ STEAM WEB API KEY", bg="#191f28", fg="#48a7ff",
                  font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=18, pady=(16, 8))
         tk.Label(dialog, text="Ключ нужен для поиска по каталогу Workshop. Он хранится локально в зашифрованном виде Windows DPAPI и не включается в EXE.",
-                 bg="#191f28", fg="#97a6b8", font=("Segoe UI", 8), wraplength=480,
+                 bg="#191f28", fg="#97a6b8", font=("Segoe UI", 8), wraplength=520,
                  justify="left").pack(anchor="w", padx=18, pady=(0, 10))
         key_var = tk.StringVar(value=self._steam_api_key)
-        entry = tk.Entry(dialog, textvariable=key_var, show="●", bg="#111720", fg="#edf2f7",
+        key_row = tk.Frame(dialog, bg="#191f28")
+        key_row.pack(fill="x", padx=18)
+        entry = tk.Entry(key_row, textvariable=key_var, show="●", bg="#111720", fg="#edf2f7",
                          insertbackground="#edf2f7", relief="flat", font=("Consolas", 10),
                          highlightthickness=1, highlightbackground="#2b3543")
-        entry.pack(fill="x", padx=18, ipady=7)
+        entry.pack(side="left", fill="x", expand=True, ipady=7)
+
+        def paste_key(_event=None):
+            try:
+                clipboard_text = dialog.clipboard_get()
+            except tk.TclError:
+                messagebox.showwarning(
+                    "Steam API key",
+                    "Буфер обмена пуст или содержит неподдерживаемые данные.",
+                    parent=dialog,
+                )
+                return "break" if _event is not None else None
+
+            value = str(clipboard_text).strip()
+            if not re.fullmatch(r"[A-Fa-f0-9]{32}", value):
+                messagebox.showwarning(
+                    "Steam API key",
+                    "В буфере обмена не найден корректный ключ Steam из 32 шестнадцатеричных символов.",
+                    parent=dialog,
+                )
+                return "break" if _event is not None else None
+
+            key_var.set(value)
+            entry.icursor(tk.END)
+            entry.focus_set()
+            return "break" if _event is not None else None
+
+        paste_button = tk.Button(
+            key_row, text="ВСТАВИТЬ", command=paste_key,
+            bg="#234763", fg="white", activebackground="#2c6288",
+            relief="flat", padx=12, pady=6,
+        )
+        paste_button.pack(side="left", padx=(8, 0))
+        entry.bind("<Control-v>", paste_key)
+        entry.bind("<Control-V>", paste_key)
+        entry.bind("<Shift-Insert>", paste_key)
         entry.focus_set()
+
         buttons = tk.Frame(dialog, bg="#191f28")
         buttons.pack(fill="x", padx=18, pady=14)
 
