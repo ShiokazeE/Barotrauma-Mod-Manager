@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build portable Windows executable
+    name: Build portable Windows application bundle
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -31,22 +31,37 @@ jobs:
       - name: Install runtime dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Build executable
+      - name: Build onedir application
         shell: cmd
         run: build_exe.bat
 
-      - name: Package portable release
+      - name: Verify and package portable application
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force release | Out-Null
-          Copy-Item .\BarotraumaModManager.exe .\release\BarotraumaModManager.exe -ErrorAction Stop
-          $exe = Get-Item .\release\BarotraumaModManager.exe
-          if ($exe.Length -lt 1MB) {
-            throw "The packaged executable is unexpectedly small ($($exe.Length) bytes)."
+          $app = ".\dist\BarotraumaModManager"
+          $exe = Join-Path $app "BarotraumaModManager.exe"
+          $internal = Join-Path $app "_internal"
+          if (!(Test-Path -LiteralPath $exe -PathType Leaf)) {
+            throw "Application executable is missing: $exe"
           }
-          Compress-Archive -Path .\release\BarotraumaModManager.exe -DestinationPath .\Barotrauma-Mod-Manager-Windows.zip -Force
-          $hash = (Get-FileHash .\Barotrauma-Mod-Manager-Windows.zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          Set-Content -Path .\SHA256SUMS.txt -Value "$hash  Barotrauma-Mod-Manager-Windows.zip" -Encoding ascii
+          if (!(Test-Path -LiteralPath $internal -PathType Container)) {
+            throw "PyInstaller onedir runtime directory is missing: $internal"
+          }
+          $exeInfo = Get-Item -LiteralPath $exe
+          if ($exeInfo.Length -lt 1MB) {
+            throw "The executable is unexpectedly small ($($exeInfo.Length) bytes)."
+          }
+          $runtimeFiles = @(Get-ChildItem -LiteralPath $internal -Recurse -File)
+          if ($runtimeFiles.Count -lt 1) {
+            throw "The bundled runtime directory is empty."
+          }
+          New-Item -ItemType Directory -Force ".\release" | Out-Null
+          Copy-Item -LiteralPath $app -Destination ".\release\BarotraumaModManager" -Recurse -Force
+          Compress-Archive -Path ".\release\BarotraumaModManager" -DestinationPath ".\Barotrauma-Mod-Manager-Windows.zip" -Force
+          $hash = (Get-FileHash ".\Barotrauma-Mod-Manager-Windows.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -Path ".\SHA256SUMS.txt" -Value "$hash  Barotrauma-Mod-Manager-Windows.zip" -Encoding ascii
+          Write-Host "Bundled runtime files: $($runtimeFiles.Count)"
+          Write-Host "Executable size: $($exeInfo.Length) bytes"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
@@ -75,14 +90,14 @@ jobs:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && 'v2.7.1' || github.ref_name }}
           target_commitish: ${{ github.sha }}
           body: |
-            Workshop scrolling, resize and bilingual interface update.
+            Windows packaging update.
 
-            - Fixed Workshop mouse-wheel handling and improved responsive resizing.
-            - Added Russian and English interface selection on first launch, saved locally on this PC.
-            - Added a header language switch and preserved existing mod profiles and Workshop names.
-            - Added an optional Boosty donation link. The manager remains free to use.
+            - Replaced the self-extracting PyInstaller executable with a transparent onedir application bundle.
+            - The ZIP contains the executable and its required runtime files; keep the extracted folder structure intact.
+            - Russian and English interface selection is saved locally on this PC.
+            - All manager features remain free; Boosty support is optional.
 
-            **Windows package:** portable Windows x64 ZIP. Extract it and run `BarotraumaModManager.exe`.
+            Windows package: extract the ZIP, keep the complete BarotraumaModManager folder together, and run BarotraumaModManager.exe inside it.
 
             Support development: https://boosty.to/shiokaze/single-payment/donation/841459/target?share=target_link
           draft: false

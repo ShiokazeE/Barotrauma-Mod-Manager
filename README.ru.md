@@ -32,9 +32,9 @@ Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma
 
 ## Скачать
 
-Открой **[GitHub Releases](https://github.com/ShiokazeE/Barotrauma-Mod-Manager/releases)**, скачай ZIP для Windows, распакуй его и запусти `BarotraumaModManager.exe`.
+Открой **[GitHub Releases](https://github.com/ShiokazeE/Barotrauma-Mod-Manager/releases)**, скачай ZIP для Windows и распакуй папку `BarotraumaModManager` целиком. Запусти `BarotraumaModManager.exe` внутри неё; каталог `_internal` должен оставаться рядом.
 
-Распакуй архив и запусти `BarotraumaModManager.exe`. Профили, SteamCMD и зашифрованный API-ключ хранятся в пользовательской папке данных Windows, а не рядом с EXE.
+Распакуй архив и сохрани всю структуру папки приложения. Не перемещай EXE отдельно и не удаляй `_internal`. Профили, SteamCMD и зашифрованный API-ключ хранятся в пользовательской папке данных Windows, а не рядом с EXE.
 
 ## Язык интерфейса
 
@@ -56,7 +56,7 @@ Pillow используется для отображения превью Works
 1. Установи Python 3.10+ и включи Python Launcher (`py`).
 2. Оставь `barotrauma_mod_manager.py` и `build_exe.bat` в одной папке.
 3. Запусти `build_exe.bat`.
-4. Скрипт создаст `BarotraumaModManager.exe` рядом с BAT-файлом.
+4. Скрипт создаст `dist\BarotraumaModManager\` с EXE и каталогом среды выполнения `_internal`. Распространяй всю папку целиком, лучше в ZIP; один EXE без остальных файлов не запускается.
 
 GitHub Actions также умеет собирать Windows EXE при отправке тега `v*`. Подробности — в [workflow сборки](.github/workflows/build-windows.yml).
 
