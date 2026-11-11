@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Added a one-click Steam API key paste button plus Ctrl+V and Shift+Insert shortcuts.
+- Clipboard contents are validated before insertion; saved keys continue to use Windows DPAPI encryption.
+
 ## 2.7.1 — Windows packaging update
 
 - Replaced the self-extracting PyInstaller --onefile executable with an explicit --onedir application bundle.

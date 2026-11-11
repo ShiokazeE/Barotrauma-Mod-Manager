@@ -18,6 +18,14 @@ class LocalizationTests(unittest.TestCase):
             translate("НАЙТИ КОЛЛЕКЦИИ / МОДПАКИ", "en"),
             "SEARCH COLLECTIONS / MOD PACKS",
         )
+        self.assertEqual(translate("ВСТАВИТЬ", "en"), "PASTE")
+        self.assertEqual(
+            translate(
+                "В буфере обмена не найден корректный ключ Steam из 32 шестнадцатеричных символов.",
+                "en",
+            ),
+            "The clipboard does not contain a valid 32-character hexadecimal Steam key.",
+        )
 
     def test_russian_and_unknown_text_are_preserved(self):
         self.assertEqual(translate("МОИ ПРОФИЛИ", "ru"), "МОИ ПРОФИЛИ")
