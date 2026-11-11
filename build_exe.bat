@@ -18,24 +18,17 @@ if errorlevel 1 goto fail
 if errorlevel 1 goto fail
 
 echo.
-echo [3/4] Building BarotraumaModManager.exe...
-%PYTHON_CMD% -m PyInstaller --noconfirm --clean --onefile --windowed --name "BarotraumaModManager" --collect-all certifi --collect-all PIL "barotrauma_mod_manager.py"
+echo [3/4] Building BarotraumaModManager (onedir)...
+%PYTHON_CMD% -m PyInstaller --noconfirm --clean --onedir --windowed --name "BarotraumaModManager" --collect-all certifi --collect-all PIL "barotrauma_mod_manager.py"
 if errorlevel 1 goto fail
 
-if not exist "dist\BarotraumaModManager.exe" goto fail
-
-echo.
-echo [4/4] Copying executable...
-copy /Y "dist\BarotraumaModManager.exe" "BarotraumaModManager.exe" >nul
-if errorlevel 1 goto fail
-
-if exist "build" rmdir /S /Q "build"
-if exist "dist" rmdir /S /Q "dist"
-if exist "BarotraumaModManager.spec" del /Q "BarotraumaModManager.spec"
+if not exist "dist\BarotraumaModManager\BarotraumaModManager.exe" goto fail
+if not exist "dist\BarotraumaModManager\_internal" goto fail
 
 echo.
 echo =============================================
-echo SUCCESS: BarotraumaModManager.exe was created.
+echo SUCCESS: dist\BarotraumaModManager is ready.
+echo ZIP the entire folder; do not separate the EXE.
 echo =============================================
 if not defined CI pause
 exit /b 0
