@@ -40,9 +40,9 @@ Screenshots of the actual Windows application will be added separately. The down
 
 ## Download
 
-Download the latest Windows ZIP from **[GitHub Releases](https://github.com/ShiokazeE/Barotrauma-Mod-Manager/releases)**, extract it, and run `BarotraumaModManager.exe`.
+Download the latest Windows ZIP from **[GitHub Releases](https://github.com/ShiokazeE/Barotrauma-Mod-Manager/releases)** and extract the complete `BarotraumaModManager` folder. Run `BarotraumaModManager.exe` from inside that folder; keep the accompanying `_internal` directory beside it.
 
-The release package is intended to be portable: extract it and run `BarotraumaModManager.exe`. The manager stores profiles, SteamCMD data and the encrypted API key in the current user's application-data directory, not beside the executable.
+The release package is a portable application folder: extract the ZIP and keep the full folder structure intact. Do not move the EXE out of its folder or delete `_internal`. The manager stores profiles, SteamCMD data and the encrypted API key in the current user's application-data directory, not beside the executable.
 
 ## Interface language
 
@@ -64,7 +64,7 @@ Pillow is used for Workshop thumbnail rendering. If it is unavailable, browsing 
 1. Install Python 3.10+ and enable the Python Launcher (`py`).
 2. Keep `barotrauma_mod_manager.py` and `build_exe.bat` in the same folder.
 3. Run `build_exe.bat`.
-4. The script creates `BarotraumaModManager.exe` next to the BAT file.
+4. The script creates `dist\BarotraumaModManager\` containing the EXE and its `_internal` runtime directory. Distribute the entire folder, preferably as a ZIP; do not distribute the EXE by itself.
 
 The project also contains a GitHub Actions workflow that builds a Windows executable when a `v*` tag is pushed. See [Release workflow](.github/workflows/build-windows.yml).
 
