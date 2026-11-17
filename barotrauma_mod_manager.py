@@ -3472,6 +3472,14 @@ class ModManagerGUI(tk.Tk):
                color="#4b3b69", hover="#655087", track=True).pack(side="left", padx=(0, 5))
         button(build_actions2, "ИСТОРИЯ ПРОФИЛЯ", self.show_profile_history,
                color="#244b63", hover="#2c607d", track=True).pack(side="left", padx=(0, 5))
+        build_actions3 = tk.Frame(build_toolbar, bg=PANEL)
+        build_actions3.pack(fill="x", pady=(7, 0))
+        button(build_actions3, "ПРОВЕРИТЬ ЗАВИСИМОСТИ", self.check_selected_build_dependencies,
+               color="#4b3b69", hover="#655087", track=True).pack(side="left", padx=(0, 5))
+        button(build_actions3, "ОБНОВИТЬ ИЗ ПРОФИЛЯ", self.update_selected_build_from_profile,
+               color="#315947", hover="#3d7059", track=True).pack(side="left", padx=(0, 5))
+        button(build_actions3, "ЭКСПОРТ КОПИИ", self.export_selected_build_copy,
+               color="#244b63", hover="#2c607d", track=True).pack(side="left", padx=(0, 5))
         self.build_library_status_var = tk.StringVar(value="Локальные сборки хранятся на этом ПК.")
         label(build_toolbar, "", size=8, color=MUTED).pack_forget()
         tk.Label(
@@ -4936,6 +4944,73 @@ class ModManagerGUI(tk.Tk):
         except Exception as exc:
             messagebox.showerror("Редактирование сборки", str(exc), parent=self)
 
+    def update_selected_build_from_profile(self):
+        if self._profile_job_running:
+            return
+        selected = self._selected_build_entries()
+        if len(selected) != 1:
+            messagebox.showinfo("Библиотека сборок", "Выбери одну сборку.", parent=self)
+            return
+        active_profile = str(self.store.data.get("active_profile", ""))
+        mods = self.store.get_profile_mods(active_profile)
+        if not mods:
+            messagebox.showwarning("Сборка", "Активный профиль пуст — обновлять состав сборки нечем.", parent=self)
+            return
+        entry = selected[0]
+        path = Path(entry["path"])
+        if not messagebox.askyesno(
+            "Обновить сборку из профиля",
+            f"Заменить список модов в «{entry['name']}» содержимым активного профиля «{active_profile}»?\n"
+            "Название, описание и привязанная Steam Collection сохранятся.",
+            parent=self,
+        ):
+            return
+        try:
+            current = read_build_pack(path)
+            payload = serialize_build_pack(
+                mods,
+                current["name"],
+                current["description"],
+                source_profile=active_profile,
+                steam_collection_id=current.get("steam_collection_id", ""),
+            )
+            self._atomic_write_build_pack(path, payload)
+            self.refresh_build_library()
+            messagebox.showinfo("Сборка", "Содержимое сборки обновлено из активного профиля.", parent=self)
+        except Exception as exc:
+            messagebox.showerror("Обновление сборки", str(exc), parent=self)
+
+    def export_selected_build_copy(self):
+        if self._profile_job_running:
+            return
+        selected = self._selected_build_entries()
+        if len(selected) != 1:
+            messagebox.showinfo("Экспорт сборки", "Выбери одну сборку для экспорта.", parent=self)
+            return
+        source = Path(selected[0]["path"])
+        try:
+            payload = source.read_bytes()
+            read_build_pack(source)  # Re-validate before exporting.
+            target_text = filedialog.asksaveasfilename(
+                parent=self,
+                title="Экспортировать копию сборки",
+                initialfile=source.name,
+                defaultextension=".bmm-pack",
+                filetypes=(("Barotrauma Mod Manager pack", "*.bmm-pack"), ("Все файлы", "*.*")),
+            )
+            if not target_text:
+                return
+            target = Path(target_text)
+            if target.resolve() == source.resolve():
+                messagebox.showinfo("Экспорт сборки", "Выбрана исходная сборка из библиотеки.", parent=self)
+                return
+            if target.suffix.casefold() != ".bmm-pack":
+                target = target.with_suffix(".bmm-pack")
+            self._atomic_write_build_pack(target, payload)
+            messagebox.showinfo("Экспорт сборки", f"Копия сохранена:\n{target}", parent=self)
+        except Exception as exc:
+            messagebox.showerror("Экспорт сборки", str(exc), parent=self)
+
     def delete_selected_build(self):
         if self._profile_job_running:
             return
@@ -4974,6 +5049,8 @@ class ModManagerGUI(tk.Tk):
         self._begin_import_build_pack(path, pack)
 
     def compare_selected_build(self):
+        if self._profile_job_running:
+            return
         selected = self._selected_build_entries()
         if len(selected) == 2:
             left_name, left_mods = selected[0]["name"], selected[0]["mods"]
@@ -5154,6 +5231,8 @@ class ModManagerGUI(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def compare_selected_server(self):
+        if self._profile_job_running:
+            return
         selected = self._selected_build_entries()
         if len(selected) > 1:
             messagebox.showinfo("Сервер", "Для сравнения с сервером выбери только одну сборку.", parent=self)
@@ -5315,6 +5394,15 @@ class ModManagerGUI(tk.Tk):
             temp = output.with_name(output.name + ".tmp")
             temp.write_bytes(payload)
             os.replace(temp, output)
+            library_dir = self._build_packs_directory().resolve()
+            if output.resolve().parent != library_dir:
+                library_copy = library_dir / output.name
+                suffix = 2
+                while library_copy.exists() and library_copy.read_bytes() != payload:
+                    library_copy = library_dir / f"{output.stem} ({suffix}){output.suffix}"
+                    suffix += 1
+                if not library_copy.exists():
+                    self._atomic_write_build_pack(library_copy, payload)
             messagebox.showinfo(
                 self._tr("Сборка сохранена"),
                 f"{self._tr('Сборка сохранена')}: {build_name}\n"
@@ -5345,6 +5433,21 @@ class ModManagerGUI(tk.Tk):
         except Exception as exc:
             messagebox.showerror("Импорт сборки", str(exc), parent=self)
             return
+
+        try:
+            library_dir = self._build_packs_directory().resolve()
+            if source_path.resolve().parent != library_dir:
+                source_bytes = source_path.read_bytes()
+                candidate = library_dir / source_path.name
+                suffix = 2
+                while candidate.exists() and candidate.read_bytes() != source_bytes:
+                    candidate = library_dir / f"{source_path.stem} ({suffix}){source_path.suffix}"
+                    suffix += 1
+                if not candidate.exists():
+                    self._atomic_write_build_pack(candidate, source_bytes)
+                self.refresh_build_library()
+        except OSError as exc:
+            self.log(f"[Build] Не удалось добавить исходный файл в библиотеку: {exc}")
 
         self._begin_import_build_pack(source_path, pack)
 
