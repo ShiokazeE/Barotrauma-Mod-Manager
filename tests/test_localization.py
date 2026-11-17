@@ -32,6 +32,14 @@ class LocalizationTests(unittest.TestCase):
             translate("Скачать отсутствующие моды сразу после импорта?", "en"),
             "Download missing mods immediately after import?",
         )
+        self.assertEqual(translate("ПРОВЕРИТЬ ЗАВИСИМОСТИ", "en"), "CHECK DEPENDENCIES")
+        self.assertEqual(translate("ОБНОВИТЬ ИЗ ПРОФИЛЯ", "en"), "UPDATE FROM PROFILE")
+        self.assertEqual(translate("ЭКСПОРТ КОПИИ", "en"), "EXPORT COPY")
+        self.assertEqual(translate("Проверка зависимостей", "en"), "Dependency check")
+        self.assertEqual(
+            translate("Новых обязательных ID добавлено: ", "en"),
+            "New required IDs added: ",
+        )
         self.assertEqual(translate("Сборка: ", "en"), "Build: ")
         self.assertEqual(translate("Модов в сборке: ", "en"), "Mods in build: ")
         self.assertEqual(translate("Создан профиль: ", "en"), "Created profile: ")
