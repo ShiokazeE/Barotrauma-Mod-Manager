@@ -4750,7 +4750,7 @@ class ModManagerGUI(tk.Tk):
             dialog,
             text=(
                 f"Всего: {comparison['left_count']} ↔ {comparison['right_count']} · "
-                f"Совпадает: {comparison['common_count']}\\n{order_text}"
+                f"Совпадает: {comparison['common_count']}\n{order_text}"
             ),
             bg=BG, fg="#9eb2c6", font=("Segoe UI", 9), justify="left",
         ).pack(anchor="w", padx=16, pady=(0, 10))
@@ -4900,7 +4900,7 @@ class ModManagerGUI(tk.Tk):
             left_mods = self.store.get_active_mods()
         server_text = simpledialog.askstring(
             "Сравнение с сервером",
-            "Вставь только Workshop Mod IDs из настроек сервера (через запятую или с новой строки).\\n"
+            "Вставь только Workshop Mod IDs из настроек сервера (через запятую или через запятую или пробел).\\n"
             "Не вставляй порт или другие параметры сервера.",
             parent=self,
         )
