@@ -117,6 +117,28 @@ with tempfile.TemporaryDirectory() as config_tmp:
         assert invalid == [bad_pack]
         assert bad_pack.exists()
 
+    # Preflight validates local manifests and reports missing or malformed package files.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        good_dir = root / "1234567890"
+        good_dir.mkdir()
+        (good_dir / "filelist.xml").write_text(
+            '<contentpackage name="Valid package" />', encoding="utf-8"
+        )
+        assert mod.validate_profile_packages(
+            [{"id": "1234567890", "title": "Valid"}], root
+        ) == []
+        missing_errors = mod.validate_profile_packages(
+            [{"id": "1234567891", "title": "Missing"}], root
+        )
+        assert any("не найден" in item for item in missing_errors)
+        (good_dir / "filelist.xml").write_text("<contentpackage", encoding="utf-8")
+        malformed_errors = mod.validate_profile_packages(
+            [{"id": "1234567890", "title": "Malformed"}], root
+        )
+        assert any("повреждён" in item for item in malformed_errors)
+        assert mod.validate_profile_packages([], root) == ["Профиль пуст."]
+
     # ZIP extraction supports normal files and rejects Zip Slip.
     with tempfile.TemporaryDirectory() as tmp:
         valid_zip = io.BytesIO()
