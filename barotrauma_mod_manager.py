@@ -5171,6 +5171,221 @@ class ModManagerGUI(tk.Tk):
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def check_selected_build_dependencies(self):
+        """Inspect Workshop child items and optionally add missing required items."""
+        if self._profile_job_running:
+            return
+        selected = self._selected_build_entries()
+        if len(selected) > 1:
+            messagebox.showinfo(
+                "Проверка зависимостей",
+                "Выбери одну сборку или сними выделение для проверки активного профиля.",
+                parent=self,
+            )
+            return
+
+        target_kind = "build" if selected else "profile"
+        if selected:
+            entry = selected[0]
+            try:
+                pack = read_build_pack(Path(entry["path"]))
+            except Exception as exc:
+                messagebox.showerror("Проверка зависимостей", str(exc), parent=self)
+                return
+            target_name = pack["name"]
+            mods = [dict(mod) for mod in pack["mods"]]
+            target_path = Path(entry["path"])
+        else:
+            target_name = str(self.store.data.get("active_profile", ""))
+            mods = self.store.get_profile_mods(target_name)
+            target_path = None
+
+        if not mods:
+            messagebox.showinfo("Проверка зависимостей", "Список модов пуст.", parent=self)
+            return
+        api_key = str(self._steam_api_key or "").strip()
+        if not api_key:
+            messagebox.showinfo(
+                "Steam API Key",
+                "Для проверки обязательных Workshop dependencies нужен личный Steam Web API key.",
+                parent=self,
+            )
+            self.configure_steam_api_key()
+            return
+
+        mod_ids = [str(item["id"]) for item in mods]
+        core = self._get_core()
+        self._set_profile_job(True)
+
+        def worker():
+            error = None
+            graph: dict[str, list[str]] = {}
+            unavailable: list[str] = []
+            truncated = False
+            merged_mods: list[dict] = []
+            added_ids: list[str] = []
+            metadata_error = ""
+            try:
+                graph, unavailable, truncated = core.fetch_workshop_dependencies(
+                    mod_ids, api_key, max_depth=5,
+                )
+                present = set(mod_ids)
+                missing_required = sorted({
+                    child_id
+                    for child_ids in graph.values()
+                    for child_id in child_ids
+                    if child_id not in present
+                })
+                metadata = {}
+                if missing_required:
+                    try:
+                        metadata = core.fetch_mods_metadata(missing_required)
+                    except Exception as exc:
+                        metadata_error = str(exc)
+
+                merged_mods, added_ids = merge_required_workshop_dependencies(
+                    mods, graph, metadata,
+                )
+            except Exception as exc:
+                error = str(exc)
+
+            if self._closing:
+                return
+
+            def finish():
+                self._set_profile_job(False)
+                if error:
+                    messagebox.showerror("Проверка зависимостей", error, parent=self)
+                    return
+
+                edge_count = sum(len(children) for children in graph.values())
+                status_lines = [
+                    f"Проверено элементов: {len(graph)}",
+                    f"Связей Workshop children: {edge_count}",
+                    f"Новых обязательных ID: {len(added_ids)}",
+                ]
+                if unavailable:
+                    status_lines.append(
+                        f"Не удалось получить сведения: {len(unavailable)}"
+                    )
+                if truncated:
+                    status_lines.append("Глубина проверки достигла лимита 5; цепочка может быть неполной.")
+                if metadata_error:
+                    status_lines.append("Не удалось получить названия некоторых новых ID; в списке останутся ID.")
+
+                if not graph and unavailable:
+                    messagebox.showwarning(
+                        "Проверка неполная",
+                        "\\n".join(status_lines)
+                        + "\\n\\nSteam не вернул данные о зависимостях. Список модов не изменён.",
+                        parent=self,
+                    )
+                    return
+
+                if not edge_count and not unavailable and not truncated:
+                    messagebox.showinfo(
+                        "Проверка зависимостей",
+                        "Steam не сообщил обязательных дочерних Workshop items для выбранных модов.",
+                        parent=self,
+                    )
+                    return
+
+                if not added_ids and not any(
+                    list(item.get("dependencies", [])) != list(graph.get(str(item.get("id")), []))
+                    for item in merged_mods
+                ):
+                    messagebox.showinfo(
+                        "Проверка зависимостей",
+                        "\\n".join(status_lines)
+                        + "\\n\\nНовых обязательных элементов нет. Состав и порядок не изменены.",
+                        parent=self,
+                    )
+                    return
+
+                added_preview = []
+                for mod_id in added_ids[:15]:
+                    title = next(
+                        (item.get("title", mod_id) for item in merged_mods if str(item.get("id")) == mod_id),
+                        mod_id,
+                    )
+                    added_preview.append(f"• {title} ({mod_id})")
+                if len(added_ids) > 15:
+                    added_preview.append(f"…и ещё {len(added_ids) - 15}")
+
+                action_text = (
+                    "Добавить новые элементы и поставить все обнаруженные зависимости перед родительскими модами?"
+                    if added_ids else
+                    "Обновить метаданные зависимостей и порядок существующих модов?"
+                )
+                summary = "\\n".join(status_lines)
+                if added_preview:
+                    summary += "\\n\\n" + "\\n".join(added_preview)
+                if unavailable or truncated:
+                    summary += "\\n\\nПроверка частичная. Недоступные элементы не будут считаться проверенными."
+                summary += "\\n\\n" + action_text
+
+                if not messagebox.askyesno(
+                    "Найденные зависимости",
+                    summary,
+                    parent=self,
+                ):
+                    return
+
+                try:
+                    if target_kind == "build":
+                        current_pack = read_build_pack(target_path)
+                        payload = serialize_build_pack(
+                            merged_mods,
+                            current_pack["name"],
+                            current_pack["description"],
+                            source_profile=current_pack["source_profile"],
+                            steam_collection_id=current_pack.get("steam_collection_id", ""),
+                        )
+                        self._atomic_write_build_pack(target_path, payload)
+                        self.refresh_build_library()
+                    else:
+                        self.store.snapshot_profile(
+                            target_name, "Перед обновлением Workshop dependencies",
+                        )
+                        self.store.set_profile_mods(target_name, merged_mods, snapshot=False)
+                        source = self.store.get_profile_source(target_name)
+                        if source.get("format") == "Barotrauma ModList":
+                            source["order_mode"] = "manual"
+                            source["ordered_ids"] = [
+                                str(item.get("id", "")) for item in merged_mods
+                            ]
+                            self.store.set_profile_source(target_name, source)
+                        self.store.save()
+                        if self.store.data.get("active_profile") == target_name:
+                            self._refresh_mod_listbox()
+                            self._update_profile_order_indicator()
+                            self._refresh_workshop_card_states()
+
+                    missing_count = sum(
+                        1 for item in merged_mods
+                        if item.get("update_status") == "MISSING"
+                        or not find_filelist_root(core.local_mods_dir / str(item.get("id", "")))
+                    )
+                    self.log(
+                        f"[Dependencies] Проверка «{target_name}»: новых ID {len(added_ids)}, "
+                        f"недоступных результатов {len(unavailable)}, глубина ограничена: {truncated}."
+                    )
+                    messagebox.showinfo(
+                        "Зависимости сохранены",
+                        f"Новых обязательных ID добавлено: {len(added_ids)}\\n"
+                        f"Модов в списке: {len(merged_mods)}\\n"
+                        f"Файлов модов отсутствует локально: {missing_count}\\n\\n"
+                        "Нажми «ПРОВЕРИТЬ» для загрузки отсутствующих модов либо используй "
+                        "«УСТАНОВИТЬ НЕДОСТАЮЩИЕ» в библиотеке сборок.",
+                        parent=self,
+                    )
+                except Exception as exc:
+                    messagebox.showerror("Сохранение зависимостей", str(exc), parent=self)
+
+            self.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def install_missing_from_build(self):
         selected = self._selected_build_entries()
         if len(selected) != 1:
