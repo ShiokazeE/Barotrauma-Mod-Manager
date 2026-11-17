@@ -481,7 +481,8 @@ def validate_profile_packages(mods: list[dict], local_mods_dir: Path) -> list[st
     """Check IDs and local package manifests before writing the active game config."""
     errors = []
     if not mods:
-        return ["Профиль пуст."]
+        # An empty profile intentionally disables regular Workshop packages.
+        return []
     seen = set()
     for index, mod in enumerate(mods, 1):
         if not isinstance(mod, dict):
@@ -2396,6 +2397,15 @@ class BaroModManagerCore:
         if not self.config_path.is_file():
             raise FileNotFoundError(f"Не найден config_player.xml: {self.config_path}")
 
+        readiness_errors = validate_profile_packages(mods_list, self.local_mods_dir)
+        if readiness_errors:
+            preview = "\\n".join(f"• {item}" for item in readiness_errors[:12])
+            if len(readiness_errors) > 12:
+                preview += f"\\n…и ещё {len(readiness_errors) - 12}"
+            raise ValueError(
+                "Проверка профиля не пройдена; config_player.xml не изменён:\\n" + preview
+            )
+
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         backup_path = self.config_path.with_suffix(self.config_path.suffix + ".bak")
         if not backup_path.exists():
@@ -3202,27 +3212,27 @@ class ModManagerGUI(tk.Tk):
         build_actions = tk.Frame(build_toolbar, bg=PANEL)
         build_actions.pack(fill="x")
         button(build_actions, "ОБНОВИТЬ СПИСОК", self.refresh_build_library,
-               color="#244b63", hover="#2c607d").pack(side="left", padx=(0, 5))
+               color="#244b63", hover="#2c607d"), track=True).pack(side="left", padx=(0, 5))
         button(build_actions, "ИМПОРТИРОВАТЬ", self.import_selected_build,
-               color="#315947", hover="#3d7059").pack(side="left", padx=(0, 5))
+               color="#315947", hover="#3d7059"), track=True).pack(side="left", padx=(0, 5))
         button(build_actions, "РЕДАКТИРОВАТЬ", self.edit_selected_build,
-               color="#244b63", hover="#2c607d").pack(side="left", padx=(0, 5))
+               color="#244b63", hover="#2c607d"), track=True).pack(side="left", padx=(0, 5))
         button(build_actions, "УДАЛИТЬ ФАЙЛ", self.delete_selected_build,
-               color="#52313a", hover="#70404c").pack(side="left", padx=(0, 5))
+               color="#52313a", hover="#70404c"), track=True).pack(side="left", padx=(0, 5))
         button(build_actions, "УСТАНОВИТЬ НЕДОСТАЮЩИЕ", self.install_missing_from_build,
-               color="#17785d", hover="#218e70").pack(side="left", padx=(0, 5))
+               color="#17785d", hover="#218e70"), track=True).pack(side="left", padx=(0, 5))
         build_actions2 = tk.Frame(build_toolbar, bg=PANEL)
         build_actions2.pack(fill="x", pady=(7, 0))
         button(build_actions2, "СРАВНИТЬ С ПРОФИЛЕМ", self.compare_selected_build,
-               color="#4b3b69", hover="#655087").pack(side="left", padx=(0, 5))
+               color="#4b3b69", hover="#655087"), track=True).pack(side="left", padx=(0, 5))
         button(build_actions2, "ПРОВЕРИТЬ STEAM COLLECTION", self.compare_selected_collection,
-               color="#4b3b69", hover="#655087").pack(side="left", padx=(0, 5))
+               color="#4b3b69", hover="#655087"), track=True).pack(side="left", padx=(0, 5))
         button(build_actions2, "ОТКРЫТЬ COLLECTION", self.open_selected_collection,
-               color="#244b63", hover="#2c607d").pack(side="left", padx=(0, 5))
+               color="#244b63", hover="#2c607d"), track=True).pack(side="left", padx=(0, 5))
         button(build_actions2, "СРАВНИТЬ С СЕРВЕРОМ", self.compare_selected_server,
-               color="#4b3b69", hover="#655087").pack(side="left", padx=(0, 5))
+               color="#4b3b69", hover="#655087"), track=True).pack(side="left", padx=(0, 5))
         button(build_actions2, "ИСТОРИЯ ПРОФИЛЯ", self.show_profile_history,
-               color="#244b63", hover="#2c607d").pack(side="left", padx=(0, 5))
+               color="#244b63", hover="#2c607d"), track=True).pack(side="left", padx=(0, 5))
         self.build_library_status_var = tk.StringVar(value="Локальные сборки хранятся на этом ПК.")
         label(build_toolbar, "", size=8, color=MUTED).pack_forget()
         tk.Label(
