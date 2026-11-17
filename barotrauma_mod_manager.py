@@ -1496,15 +1496,18 @@ class BaroModManagerCore:
             next_frontier: list[str] = []
             for start in range(0, len(batch), 50):
                 chunk = batch[start:start + 50]
-                params = {
-                    "key": key,
-                    "includechildren": "true",
+                input_payload = {
+                    "publishedfileids": chunk,
+                    "includechildren": True,
                 }
-                params.update({
-                    f"publishedfileids[{index}]": mid
-                    for index, mid in enumerate(chunk)
-                })
-                response = self.session.get(endpoint, params=params, timeout=(10, 45))
+                response = self.session.get(
+                    endpoint,
+                    params={
+                        "key": key,
+                        "input_json": json.dumps(input_payload, separators=(",", ":")),
+                    },
+                    timeout=(10, 45),
+                )
                 if response.status_code in (401, 403):
                     raise RuntimeError("Steam отклонил API key при проверке зависимостей.")
                 if response.status_code == 429:
@@ -5273,11 +5276,11 @@ class ModManagerGUI(tk.Tk):
                 if metadata_error:
                     status_lines.append("Не удалось получить названия некоторых новых ID; в списке останутся ID.")
 
-                if not graph and unavailable:
+                if not edge_count and not added_ids and (unavailable or truncated):
                     messagebox.showwarning(
                         "Проверка неполная",
                         "\\n".join(status_lines)
-                        + "\\n\\nSteam не вернул данные о зависимостях. Список модов не изменён.",
+                        + "\\n\\nSteam не вернул полные данные о зависимостях. Список модов не изменён.",
                         parent=self,
                     )
                     return
@@ -5290,10 +5293,12 @@ class ModManagerGUI(tk.Tk):
                     )
                     return
 
-                if not added_ids and not any(
-                    list(item.get("dependencies", [])) != list(graph.get(str(item.get("id")), []))
+                known_relationships_changed = any(
+                    str(item.get("id", "")) in graph
+                    and list(item.get("dependencies", [])) != list(graph[str(item.get("id", ""))])
                     for item in merged_mods
-                ):
+                )
+                if not added_ids and not known_relationships_changed:
                     messagebox.showinfo(
                         "Проверка зависимостей",
                         "\\n".join(status_lines)
