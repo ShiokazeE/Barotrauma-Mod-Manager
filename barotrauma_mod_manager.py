@@ -4690,7 +4690,7 @@ class ModManagerGUI(tk.Tk):
                 raise ValueError("Файл сборки находится вне локальной библиотеки.")
             if not messagebox.askyesno(
                 "Удалить сборку",
-                f"Удалить файл «{path.name}»?\\nПрофили и локальные файлы модов не затрагиваются.",
+                f"Удалить файл «{path.name}»?\nПрофили и локальные файлы модов не затрагиваются.",
                 parent=self,
             ):
                 return
