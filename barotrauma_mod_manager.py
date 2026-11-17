@@ -31,6 +31,7 @@ except ImportError:  # Thumbnails are optional; Workshop search/download still w
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+APP_VERSION = "2.8.0"
 BAROTRAUMA_APP_ID = "602960"
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
@@ -2689,7 +2690,7 @@ class ModManagerGUI(tk.Tk):
         super().__init__()
         self.language = choose_or_load_language(self, LANGUAGE_FILE)
         self._install_dialog_localization()
-        self.title("Barotrauma Mod Manager 2.7.1")
+        self.title(f"Barotrauma Mod Manager {APP_VERSION}")
         self.geometry("1260x860")
         self.minsize(1020, 720)
         self.configure(bg="#101318")
