@@ -18,6 +18,10 @@ class LocalizationTests(unittest.TestCase):
             translate("НАЙТИ КОЛЛЕКЦИИ / МОДПАКИ", "en"),
             "SEARCH COLLECTIONS / MOD PACKS",
         )
+        self.assertEqual(translate("СОХРАНИТЬ СБОРКУ", "en"), "SAVE BUILD")
+        self.assertEqual(translate("ИМПОРТ СБОРКИ", "en"), "IMPORT BUILD")
+        self.assertEqual(translate("Сборка: ", "en"), "Build: ")
+        self.assertEqual(translate("Модов в сборке: ", "en"), "Mods in build: ")
         self.assertEqual(translate("ВСТАВИТЬ", "en"), "PASTE")
         self.assertEqual(
             translate(
