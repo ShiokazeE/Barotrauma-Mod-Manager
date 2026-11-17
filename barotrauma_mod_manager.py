@@ -611,6 +611,26 @@ class ProfileStore:
             source = self.data.setdefault("profile_sources", {}).get(profile_name, {})
             return dict(source) if isinstance(source, dict) else {}
 
+    def create_profile(
+        self, profile_name: str, mods: list[dict], source: dict | None = None,
+        activate: bool = False,
+    ) -> None:
+        """Atomically add a new profile without replacing any existing profile."""
+        name = str(profile_name or "").strip()
+        if not name or len(name) > 40:
+            raise ValueError("Название профиля должно содержать от 1 до 40 символов.")
+        if not isinstance(mods, list):
+            raise ValueError("Состав профиля должен быть списком модов.")
+        with self._lock:
+            if name in self.data["profiles"]:
+                raise ValueError(f"Профиль «{name}» уже существует.")
+            self.data["profiles"][name] = [dict(mod) for mod in mods]
+            if source is not None:
+                self.data.setdefault("profile_sources", {})[name] = dict(source)
+            if activate:
+                self.data["active_profile"] = name
+            self.save()
+
     def mark_mod_updated(self, mod_id: str, steam_time_updated: int):
         if steam_time_updated > 0:
             with self._lock:
@@ -2765,6 +2785,10 @@ class ModManagerGUI(tk.Tk):
                color="#263e52", hover="#31536d", track=True).pack(side="left", padx=(0, 5))
         button(list_toolbar, "ЭКСПОРТ XML", self.export_modlist_xml,
                color="#263e52", hover="#31536d", track=True).pack(side="left", padx=(0, 5))
+        button(list_toolbar, "СОХРАНИТЬ СБОРКУ", self.export_build_pack,
+               color="#315947", hover="#3d7059", track=True).pack(side="left", padx=(0, 5))
+        button(list_toolbar, "ИМПОРТ СБОРКИ", self.import_build_pack,
+               color="#315947", hover="#3d7059", track=True).pack(side="left", padx=(0, 5))
         button(list_toolbar, "ПРИМЕНИТЬ В ИГРУ", self.apply_active_profile_to_game,
                color=GREEN, hover="#22b889", track=True).pack(side="right")
 
@@ -4222,6 +4246,206 @@ class ModManagerGUI(tk.Tk):
             if game_dir.is_dir():
                 return game_dir
         return Path.home()
+
+    def _build_packs_directory(self) -> Path:
+        BUILD_PACKS_DIR.mkdir(parents=True, exist_ok=True)
+        return BUILD_PACKS_DIR
+
+    def export_build_pack(self):
+        """Save the active profile as one portable .bmm-pack file."""
+        if self._profile_job_running:
+            return
+        profile_name = str(self.store.data.get("active_profile", "Barotrauma Build"))
+        mods = self.store.get_profile_mods(profile_name)
+        if not mods:
+            messagebox.showinfo("Сборки", "Сначала добавь моды в профиль, затем сохраняй сборку.", parent=self)
+            return
+
+        build_name = simpledialog.askstring(
+            "Сохранить сборку", "Название сборки (до 40 символов):",
+            initialvalue=profile_name, parent=self,
+        )
+        if build_name is None:
+            return
+        build_name = build_name.strip()
+        if not build_name or len(build_name) > 40:
+            messagebox.showwarning("Сборки", "Название сборки должно содержать от 1 до 40 символов.", parent=self)
+            return
+
+        description = simpledialog.askstring(
+            "Описание сборки", "Краткое описание (необязательно):",
+            initialvalue="", parent=self,
+        )
+        if description is None:
+            return
+        if len(description.strip()) > BUILD_PACK_MAX_DESCRIPTION:
+            messagebox.showwarning(
+                "Сборки",
+                f"Описание не должно превышать {BUILD_PACK_MAX_DESCRIPTION} символов.",
+                parent=self,
+            )
+            return
+
+        safe_name = re.sub(r"[\\/:*?""<>|]+", "_", build_name).strip(" ._") or "Barotrauma_Build"
+        selected_path = filedialog.asksaveasfilename(
+            parent=self,
+            title="Сохранить сборку",
+            initialdir=str(self._build_packs_directory()),
+            initialfile=f"{safe_name}.bmm-pack",
+            defaultextension=".bmm-pack",
+            filetypes=(("Barotrauma Mod Manager pack", "*.bmm-pack"), ("Все файлы", "*.*")),
+        )
+        if not selected_path:
+            return
+
+        try:
+            payload = serialize_build_pack(
+                mods, build_name, description=description, source_profile=profile_name,
+            )
+            output = Path(selected_path)
+            if output.suffix.casefold() != ".bmm-pack":
+                output = output.with_suffix(".bmm-pack")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            temp = output.with_name(output.name + ".tmp")
+            temp.write_bytes(payload)
+            os.replace(temp, output)
+            messagebox.showinfo(
+                "Сборка сохранена",
+                f"Сборка «{build_name}» сохранена.\nМодов: {len(mods)}\n\n"
+                f"Файл можно передать другу: {output}",
+                parent=self,
+            )
+            self.log(f"[Build] Экспортирована сборка «{build_name}»: {len(mods)} модов.")
+        except Exception as exc:
+            messagebox.showerror("Экспорт сборки", str(exc), parent=self)
+
+    def import_build_pack(self):
+        """Import a .bmm-pack into a new profile; existing profiles are never overwritten."""
+        if self._profile_job_running:
+            return
+        selected_path = filedialog.askopenfilename(
+            parent=self,
+            title="Импортировать сборку",
+            initialdir=str(self._build_packs_directory()),
+            filetypes=(("Barotrauma Mod Manager pack", "*.bmm-pack"), ("ZIP", "*.zip"), ("Все файлы", "*.*")),
+        )
+        if not selected_path:
+            return
+        source_path = Path(selected_path)
+        try:
+            pack = read_build_pack(source_path)
+        except Exception as exc:
+            messagebox.showerror("Импорт сборки", str(exc), parent=self)
+            return
+
+        base_name = pack["name"][:40].strip() or "Imported Build"
+        target_name = base_name
+        suffix = 2
+        existing_names = set(self.store.data["profiles"])
+        while target_name in existing_names:
+            suffix_text = f" ({suffix})"
+            target_name = f"{base_name[:40 - len(suffix_text)].rstrip()}{suffix_text}"
+            suffix += 1
+
+        confirm = messagebox.askyesno(
+            "Импорт сборки",
+            f"Сборка: {pack['name']}\n"
+            f"Модов: {pack['mod_count']}\n"
+            f"Описание: {pack['description'] or '—'}\n\n"
+            f"Будет создан отдельный профиль «{target_name}». "
+            "Существующие профили и файлы модов не изменятся. Продолжить?",
+            parent=self,
+        )
+        if not confirm:
+            return
+
+        core = self._get_core()
+        self._set_profile_job(True)
+        threading.Thread(
+            target=self._worker_import_build_pack,
+            args=(core, pack, source_path.name, target_name),
+            daemon=True,
+        ).start()
+
+    def _worker_import_build_pack(self, core, pack, source_file: str, profile_name: str):
+        error = None
+        missing_count = 0
+        imported_count = 0
+        try:
+            parsed_mods = pack["mods"]
+            ids = [str(item["id"]) for item in parsed_mods]
+            remote_meta = {}
+            try:
+                remote_meta = core.fetch_mods_metadata(ids)
+            except Exception as metadata_error:
+                self.log(
+                    f"[Build] Не удалось получить метаданные Steam ({metadata_error}); "
+                    "импортирую список из файла сборки."
+                )
+
+            imported = []
+            for index, parsed in enumerate(parsed_mods):
+                mid = str(parsed["id"])
+                merged = dict(remote_meta.get(mid, {}))
+                # Pack titles and order are authoritative; online metadata fills in extra fields only.
+                merged["id"] = mid
+                merged["title"] = str(parsed.get("title") or merged.get("title") or f"Workshop_{mid}")
+                merged.setdefault("dependencies", [])
+                merged["author_order"] = index
+                try:
+                    installed = bool(
+                        find_filelist_root(core.local_mods_dir / mid) or core._find_source(mid)
+                    )
+                except (OSError, AttributeError):
+                    installed = False
+                if installed:
+                    merged["update_status"] = merged.get("update_status", "OK")
+                else:
+                    merged["update_status"] = "MISSING"
+                    missing_count += 1
+                imported.append(merged)
+
+            source = {
+                "format": "Barotrauma ModList",
+                "source_name": pack["name"],
+                "source_file": Path(source_file).name,
+                "order_mode": "author",
+                "ordered_ids": ids,
+                "imported_at": int(time.time()),
+                "pack_format": BUILD_PACK_FORMAT_VERSION,
+                "description": pack["description"],
+                "source_profile": pack["source_profile"],
+                "pack_created_at": pack["created_at"],
+            }
+            self.store.create_profile(profile_name, imported, source=source, activate=True)
+            imported_count = len(imported)
+            self.log(
+                f"[Build] Импортирована сборка «{pack['name']}»: {imported_count} модов; "
+                f"отсутствуют локально: {missing_count}. Авторский порядок сохранён."
+            )
+        except Exception as exc:
+            error = str(exc)
+            self.log(f"[ОШИБКА Build] {error}")
+
+        if not self._closing:
+            def finish():
+                self._refresh_profile_selector()
+                self._refresh_mod_listbox()
+                self._refresh_workshop_card_states()
+                self._update_profile_order_indicator()
+                self._set_profile_job(False)
+                if error:
+                    messagebox.showerror("Импорт сборки", error, parent=self)
+                else:
+                    messagebox.showinfo(
+                        "Сборка импортирована",
+                        f"Создан профиль «{profile_name}».\n"
+                        f"Модов в сборке: {imported_count}.\n"
+                        f"Файлов модов пока нет локально: {missing_count}.\n\n"
+                        "Список и порядок сохранены. Отсутствующие моды нужно загрузить через Workshop.",
+                        parent=self,
+                    )
+            self.after(0, finish)
 
     def import_modlist_xml(self):
         """Import the author's native <mods><Vanilla/><Workshop/></mods> preset."""
