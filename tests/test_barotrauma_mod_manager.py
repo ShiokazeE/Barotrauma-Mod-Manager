@@ -67,6 +67,176 @@ with tempfile.TemporaryDirectory() as config_tmp:
             raise AssertionError("Creating a duplicate profile should fail")
         assert store.get_profile_mods("Shared Build")[0]["id"] == "1234567890"
 
+    # Build and server list comparisons preserve order and detect both differences.
+    comparison = mod.compare_mod_lists(
+        ["1234567890", "1234567891", "1234567892"],
+        ["1234567891", "1234567890", "1234567893"],
+    )
+    assert comparison["only_left"] == ["1234567892"]
+    assert comparison["only_right"] == ["1234567893"]
+    assert comparison["same_order"] is False
+    assert comparison["common_count"] == 2
+    assert mod.parse_server_workshop_ids("1234567890, 1234567891\n1234567892") == [
+        "1234567890", "1234567891", "1234567892"
+    ]
+    try:
+        mod.parse_server_workshop_ids("1234567890, 27015")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("A non-Workshop server setting was accepted as a mod ID")
+
+    # Build and profile history saves the previous state before replacing it and restores atomically.
+    with tempfile.TemporaryDirectory() as tmp:
+        store = mod.ProfileStore(Path(tmp) / "profiles.json")
+        store.set_active_mods([
+            {"id": "1234567890", "title": "Before"},
+            {"id": "1234567891", "title": "Second"},
+        ])
+        store.set_profile_mods("Основной", [{"id": "1234567892", "title": "After"}])
+        history = store.get_profile_history("Основной")
+        assert len(history) == 1
+        assert [item["id"] for item in history[0]["mods"]] == ["1234567890", "1234567891"]
+        store.restore_profile_snapshot("Основной", 0)
+        assert [item["id"] for item in store.get_active_mods()] == ["1234567890", "1234567891"]
+        restored_store = mod.ProfileStore(Path(tmp) / "profiles.json")
+        assert restored_store.get_active_mods()[0]["title"] == "Before"
+        assert len(restored_store.get_profile_history("Основной")) == 2
+
+    # Build library index keeps valid packs and reports malformed files without deleting them.
+    with tempfile.TemporaryDirectory() as tmp:
+        directory = Path(tmp)
+        good_pack = directory / "good.bmm-pack"
+        good_pack.write_bytes(mod.serialize_build_pack(
+            [{"id": "1234567890", "title": "Test"}], "Indexed Build"
+        ))
+        bad_pack = directory / "bad.bmm-pack"
+        bad_pack.write_bytes(b"not a zip")
+        valid, invalid = mod.list_build_packs(directory)
+        assert len(valid) == 1 and valid[0]["name"] == "Indexed Build"
+        assert invalid == [bad_pack]
+        assert bad_pack.exists()
+
+    # Required Workshop children are inserted before their parent, transitively.
+    dependency_order, dependency_added = mod.merge_required_workshop_dependencies(
+        [
+            {"id": "1234567890", "title": "Parent"},
+            {"id": "2559634234", "title": "Lua For Barotrauma"},
+        ],
+        {
+            "1234567890": ["1234567891", "2559634234"],
+            "1234567891": ["1234567892"],
+            "1234567892": [],
+            "2559634234": [],
+        },
+        {
+            "1234567891": {"title": "Required child"},
+            "1234567892": {"title": "Transitive child"},
+        },
+    )
+    assert [item["id"] for item in dependency_order] == [
+        "2559634234", "1234567892", "1234567891", "1234567890"
+    ]
+    assert dependency_added == ["1234567892", "1234567891"]
+    assert dependency_order[-1]["dependencies"] == ["1234567891", "2559634234"]
+    try:
+        mod.merge_required_workshop_dependencies(
+            [{"id": "1234567890", "title": "Cycle A"}],
+            {"1234567890": ["1234567891"], "1234567891": ["1234567890"]},
+        )
+    except ValueError as exc:
+        assert "цикл" in str(exc).lower()
+    else:
+        raise AssertionError("Cyclic Workshop dependencies were accepted")
+
+    # Steam GetDetails uses the documented service input_json envelope and recursively returns children.
+    with tempfile.TemporaryDirectory() as tmp:
+        core = mod.BaroModManagerCore(tmp, "", log_callback=lambda _msg: None)
+
+        class DetailsResponse:
+            status_code = 200
+            def __init__(self, body):
+                self.body = body
+            def raise_for_status(self):
+                return None
+            def json(self):
+                return self.body
+
+        class DetailsSession:
+            def __init__(self):
+                self.calls = []
+            def get(self, url, params=None, timeout=None):
+                self.calls.append((url, dict(params or {}), timeout))
+                payload = json.loads(params["input_json"])
+                ids = payload["publishedfileids"]
+                details = []
+                for item_id in ids:
+                    children = (
+                        [{"publishedfileid": "1234567891"}]
+                        if item_id == "1234567890" else []
+                    )
+                    details.append({
+                        "publishedfileid": item_id,
+                        "result": 1,
+                        "consumer_app_id": int(mod.BAROTRAUMA_APP_ID),
+                        "children": children,
+                    })
+                return DetailsResponse({"response": {"publishedfiledetails": details}})
+
+        fake_details = DetailsSession()
+        core.session = fake_details
+        graph, unavailable, truncated = core.fetch_workshop_dependencies(
+            ["1234567890"], "A" * 32,
+        )
+        assert graph == {"1234567890": ["1234567891"], "1234567891": []}, graph
+        assert unavailable == []
+        assert truncated is False
+        assert fake_details.calls[0][1]["key"] == "A" * 32
+        assert json.loads(fake_details.calls[0][1]["input_json"]) == {
+            "publishedfileids": ["1234567890"], "includechildren": True,
+        }
+
+        class MissingChildrenSession:
+            def get(self, url, params=None, timeout=None):
+                payload = json.loads(params["input_json"])
+                item_id = payload["publishedfileids"][0]
+                return DetailsResponse({"response": {"publishedfiledetails": [{
+                    "publishedfileid": item_id,
+                    "result": 1,
+                    "consumer_app_id": int(mod.BAROTRAUMA_APP_ID),
+                    # Missing child field must be treated as unknown, not as no dependencies.
+                }]}})
+
+        core.session = MissingChildrenSession()
+        graph, unavailable, truncated = core.fetch_workshop_dependencies(
+            ["1234567890"], "A" * 32,
+        )
+        assert graph == {}
+        assert unavailable == ["1234567890"]
+        assert truncated is False
+
+    # Preflight validates local manifests and reports missing or malformed package files.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        good_dir = root / "1234567890"
+        good_dir.mkdir()
+        (good_dir / "filelist.xml").write_text(
+            '<contentpackage name="Valid package" />', encoding="utf-8"
+        )
+        assert mod.validate_profile_packages(
+            [{"id": "1234567890", "title": "Valid"}], root
+        ) == []
+        missing_errors = mod.validate_profile_packages(
+            [{"id": "1234567891", "title": "Missing"}], root
+        )
+        assert any("не найден" in item for item in missing_errors)
+        (good_dir / "filelist.xml").write_text("<contentpackage", encoding="utf-8")
+        malformed_errors = mod.validate_profile_packages(
+            [{"id": "1234567890", "title": "Malformed"}], root
+        )
+        assert any("повреждён" in item for item in malformed_errors)
+        assert mod.validate_profile_packages([], root) == []
+
     # ZIP extraction supports normal files and rejects Zip Slip.
     with tempfile.TemporaryDirectory() as tmp:
         valid_zip = io.BytesIO()
@@ -158,16 +328,28 @@ with tempfile.TemporaryDirectory() as config_tmp:
 
     # Portable build packs round-trip metadata and preserve the exact ModList order.
     build_payload = mod.serialize_build_pack(
-        parsed, "My Shared Build", "A short campaign preset", source_profile="Main"
+        parsed, "My Shared Build", "A short campaign preset",
+        source_profile="Main", steam_collection_id="1234509876",
     )
     build_pack = mod.parse_build_pack_bytes(build_payload)
     assert build_pack["name"] == "My Shared Build"
     assert build_pack["description"] == "A short campaign preset"
     assert build_pack["source_profile"] == "Main"
+    assert build_pack["steam_collection_id"] == "1234509876"
     assert build_pack["mod_count"] == 3
     assert [item["id"] for item in build_pack["mods"]] == [
         "2559634234", "1234567890", "1234567891"
     ]
+    dependency_payload = mod.serialize_build_pack(
+        [
+            {"id": "1234567890", "title": "Parent", "dependencies": ["1234567891"]},
+            {"id": "1234567891", "title": "Required child", "dependencies": []},
+        ],
+        "Dependency Build",
+    )
+    dependency_pack = mod.parse_build_pack_bytes(dependency_payload)
+    assert dependency_pack["mods"][0]["dependencies"] == ["1234567891"]
+    assert dependency_pack["mods"][1]["dependencies"] == []
     with tempfile.TemporaryDirectory() as pack_tmp:
         pack_path = Path(pack_tmp) / "shared.bmm-pack"
         pack_path.write_bytes(build_payload)
@@ -290,6 +472,15 @@ with tempfile.TemporaryDirectory() as config_tmp:
         written = config.read_text(encoding='utf-8')
         assert 'keep' in written and 'custom' in written and 'LocalMods/1234567890/filelist.xml' in written
         assert config.with_suffix('.xml.bak').is_file()
+
+        before_invalid_apply = config.read_bytes()
+        try:
+            core.apply_to_config_player([{'id': '1234567891', 'title': 'Missing package'}])
+        except ValueError as exc:
+            assert 'filelist.xml' in str(exc)
+        else:
+            raise AssertionError('Applying a profile with a missing package should fail preflight')
+        assert config.read_bytes() == before_invalid_apply, 'config_player.xml changed after failed preflight'
 
 print('PASS: core smoke tests')
 
