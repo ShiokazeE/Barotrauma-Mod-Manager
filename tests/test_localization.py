@@ -22,6 +22,18 @@ class LocalizationTests(unittest.TestCase):
         self.assertEqual(translate("ИМПОРТ СБОРКИ", "en"), "IMPORT BUILD")
         self.assertEqual(translate("Сборка: ", "en"), "Build: ")
         self.assertEqual(translate("Модов в сборке: ", "en"), "Mods in build: ")
+        self.assertEqual(translate("Создан профиль: ", "en"), "Created profile: ")
+        self.assertEqual(
+            translate("Файлов модов пока нет локально: ", "en"),
+            "Mod files not installed locally yet: ",
+        )
+        self.assertEqual(
+            translate(
+                "Список и порядок сохранены. Нажми «Проверить», чтобы загрузить отсутствующие моды.",
+                "en",
+            ),
+            "The list and order are saved. Press Check Updates to download missing mods.",
+        )
         self.assertEqual(translate("ВСТАВИТЬ", "en"), "PASTE")
         self.assertEqual(
             translate(
