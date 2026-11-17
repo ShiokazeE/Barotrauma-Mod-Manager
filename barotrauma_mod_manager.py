@@ -2882,8 +2882,10 @@ class ModManagerGUI(tk.Tk):
         self.notebook.grid(row=3, column=0, sticky="nsew")
         self.profile_tab = tk.Frame(self.notebook, bg=BG, padx=1, pady=8)
         self.workshop_tab = tk.Frame(self.notebook, bg=BG, padx=1, pady=8)
+        self.builds_tab = tk.Frame(self.notebook, bg=BG, padx=1, pady=8)
         self.notebook.add(self.profile_tab, text="  МОИ ПРОФИЛИ  ")
         self.notebook.add(self.workshop_tab, text="  STEAM WORKSHOP  ")
+        self.notebook.add(self.builds_tab, text="  МОИ СБОРКИ  ")
 
         # Profile header: one compact strip instead of several competing cards.
         profile = self.profile_tab
@@ -3150,7 +3152,83 @@ class ModManagerGUI(tk.Tk):
         )
         self.workshop_more_btn.grid(row=2, column=0, sticky="e", pady=(8, 0))
         self.workshop_more_btn.config(state="disabled")
+
+        # Local build library: validated .bmm-pack files, not a second profile store.
+        builds = self.builds_tab
+        builds.columnconfigure(0, weight=1)
+        builds.rowconfigure(1, weight=1)
+        build_toolbar = card(builds, padx=12, pady=10)
+        build_toolbar.grid(row=0, column=0, sticky="we", pady=(0, 8))
+        label(build_toolbar, "БИБЛИОТЕКА СБОРOК", size=9, color=ACCENT, bold=True).pack(anchor="w", pady=(0, 8))
+        build_actions = tk.Frame(build_toolbar, bg=PANEL)
+        build_actions.pack(fill="x")
+        button(build_actions, "ОБНОВИТЬ СПИСОК", self.refresh_build_library,
+               color="#244b63", hover="#2c607d").pack(side="left", padx=(0, 5))
+        button(build_actions, "ИМПОРТИРОВАТЬ", self.import_selected_build,
+               color="#315947", hover="#3d7059").pack(side="left", padx=(0, 5))
+        button(build_actions, "РЕДАКТИРОВАТЬ", self.edit_selected_build,
+               color="#244b63", hover="#2c607d").pack(side="left", padx=(0, 5))
+        button(build_actions, "УДАЛИТЬ ФАЙЛ", self.delete_selected_build,
+               color="#52313a", hover="#70404c").pack(side="left", padx=(0, 5))
+        button(build_actions, "УСТАНОВИТЬ НЕДОСТАЮЩИЕ", self.install_missing_from_build,
+               color="#17785d", hover="#218e70").pack(side="left", padx=(0, 5))
+        build_actions2 = tk.Frame(build_toolbar, bg=PANEL)
+        build_actions2.pack(fill="x", pady=(7, 0))
+        button(build_actions2, "СРАВНИТЬ С ПРОФИЛЕМ", self.compare_selected_build,
+               color="#4b3b69", hover="#655087").pack(side="left", padx=(0, 5))
+        button(build_actions2, "ПРОВЕРИТЬ STEAM COLLECTION", self.compare_selected_collection,
+               color="#4b3b69", hover="#655087").pack(side="left", padx=(0, 5))
+        button(build_actions2, "СРАВНИТЬ С СЕРВЕРОМ", self.compare_selected_server,
+               color="#4b3b69", hover="#655087").pack(side="left", padx=(0, 5))
+        button(build_actions2, "ИСТОРИЯ ПРОФИЛЯ", self.show_profile_history,
+               color="#244b63", hover="#2c607d").pack(side="left", padx=(0, 5))
+        self.build_library_status_var = tk.StringVar(value="Локальные сборки хранятся на этом ПК.")
+        label(build_toolbar, "", size=8, color=MUTED).pack_forget()
+        tk.Label(
+            build_toolbar, textvariable=self.build_library_status_var,
+            bg=PANEL, fg=MUTED, font=("Segoe UI", 8), anchor="w",
+        ).pack(anchor="w", pady=(7, 0))
+
+        build_list_panel = card(builds, padx=12, pady=10)
+        build_list_panel.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
+        build_list_panel.columnconfigure(0, weight=1)
+        build_list_panel.rowconfigure(0, weight=1)
+        self.build_library_tree = ttk.Treeview(
+            build_list_panel,
+            columns=("name", "mods", "collection", "updated", "file"),
+            show="headings", selectmode="extended", style="Baro.Treeview",
+        )
+        for column, caption, width, anchor, stretch in (
+            ("name", "СБОРКА", 240, "w", True),
+            ("mods", "МОДЫ", 65, "center", False),
+            ("collection", "STEAM COLLECTION", 150, "center", False),
+            ("updated", "ИЗМЕНЁН", 145, "center", False),
+            ("file", "ФАЙЛ", 260, "w", True),
+        ):
+            self.build_library_tree.heading(column, text=caption)
+            self.build_library_tree.column(column, width=width, anchor=anchor, stretch=stretch)
+        self.build_library_tree.grid(row=0, column=0, sticky="nsew")
+        build_scroll = ttk.Scrollbar(
+            build_list_panel, orient="vertical", command=self.build_library_tree.yview,
+            style="Baro.Vertical.TScrollbar",
+        )
+        build_scroll.grid(row=0, column=1, sticky="ns")
+        self.build_library_tree.configure(yscrollcommand=build_scroll.set)
+        self.build_library_tree.bind("<<TreeviewSelect>>", self._on_build_library_selection)
+        self.build_library_tree.bind("<Double-Button-1>", lambda _event: self.edit_selected_build())
+        self._build_library_entries = {}
+        self.build_details_var = tk.StringVar(
+            value="Выбери сборку, чтобы увидеть описание, Workshop ID и связанные данные."
+        )
+        build_details = card(builds, padx=12, pady=8)
+        build_details.grid(row=2, column=0, sticky="we")
+        tk.Label(
+            build_details, textvariable=self.build_details_var, bg=PANEL, fg="#b7c7d7",
+            font=("Segoe UI", 8), justify="left", anchor="w", wraplength=1100,
+        ).pack(fill="x")
+
         self._update_path_summary()
+        self.refresh_build_library()
 
     def toggle_paths_panel(self):
         self._paths_expanded = not self._paths_expanded
