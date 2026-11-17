@@ -4544,6 +4544,22 @@ class ModManagerGUI(tk.Tk):
             )
             return
 
+        collection_text = simpledialog.askstring(
+            "Steam Collection",
+            "Steam Collection ID или ссылка (необязательно):",
+            initialvalue="",
+            parent=self,
+        )
+        if collection_text is None:
+            return
+        collection_id = ""
+        if collection_text.strip():
+            try:
+                collection_id = self._get_core().extract_steam_id(collection_text.strip())
+            except ValueError as exc:
+                messagebox.showwarning("Steam Collection", str(exc), parent=self)
+                return
+
         safe_name = re.sub(r'[\\/:*?"<>|]+', "_", build_name).strip(" ._") or "Barotrauma_Build"
         selected_path = filedialog.asksaveasfilename(
             parent=self,
@@ -4559,6 +4575,7 @@ class ModManagerGUI(tk.Tk):
         try:
             payload = serialize_build_pack(
                 mods, build_name, description=description, source_profile=profile_name,
+                steam_collection_id=collection_id,
             )
             output = Path(selected_path)
             if output.suffix.casefold() != ".bmm-pack":
@@ -4575,6 +4592,7 @@ class ModManagerGUI(tk.Tk):
                 parent=self,
             )
             self.log(f"[Build] Экспортирована сборка «{build_name}»: {len(mods)} модов.")
+            self.refresh_build_library()
         except Exception as exc:
             messagebox.showerror("Экспорт сборки", str(exc), parent=self)
 
@@ -4597,6 +4615,9 @@ class ModManagerGUI(tk.Tk):
             messagebox.showerror("Импорт сборки", str(exc), parent=self)
             return
 
+        self._begin_import_build_pack(source_path, pack)
+
+    def _begin_import_build_pack(self, source_path: Path, pack: dict):
         base_name = pack["name"][:40].strip() or "Imported Build"
         target_name = base_name
         suffix = 2
@@ -4613,24 +4634,28 @@ class ModManagerGUI(tk.Tk):
             f"{self._tr('Будет создан отдельный профиль: ')}{target_name}\n"
             f"{self._tr('Существующие профили и файлы модов не изменятся. Продолжить?')}"
         )
-        confirm = messagebox.askyesno(
-            self._tr("Импорт сборки"), confirm_text, parent=self,
-        )
-        if not confirm:
+        if not messagebox.askyesno(self._tr("Импорт сборки"), confirm_text, parent=self):
             return
-
+        download_missing = messagebox.askyesno(
+            self._tr("Установить моды"),
+            self._tr("Скачать отсутствующие моды сразу после импорта?"),
+            parent=self,
+        )
         core = self._get_core()
         self._set_profile_job(True)
         threading.Thread(
             target=self._worker_import_build_pack,
-            args=(core, pack, source_path.name, target_name),
+            args=(core, pack, source_path.name, target_name, download_missing),
             daemon=True,
         ).start()
 
-    def _worker_import_build_pack(self, core, pack, source_file: str, profile_name: str):
+    def _worker_import_build_pack(
+        self, core, pack, source_file: str, profile_name: str, download_missing: bool = False,
+    ):
         error = None
         missing_count = 0
         imported_count = 0
+        failed = {}
         try:
             parsed_mods = pack["mods"]
             ids = [str(item["id"]) for item in parsed_mods]
@@ -4644,6 +4669,7 @@ class ModManagerGUI(tk.Tk):
                 )
 
             imported = []
+            missing_ids = []
             for index, parsed in enumerate(parsed_mods):
                 mid = str(parsed["id"])
                 merged = dict(remote_meta.get(mid, {}))
@@ -4663,7 +4689,25 @@ class ModManagerGUI(tk.Tk):
                 else:
                     merged["update_status"] = "MISSING"
                     missing_count += 1
+                    missing_ids.append(mid)
                 imported.append(merged)
+
+            if download_missing and missing_ids:
+                self.log(f"[Build] Запускаю загрузку {len(missing_ids)} отсутствующих модов...")
+                failed = core.acquire_mods(
+                    missing_ids,
+                    metadata={mid: remote_meta.get(mid, {}) for mid in missing_ids},
+                )
+                for item in imported:
+                    mid = str(item["id"])
+                    if mid not in missing_ids:
+                        continue
+                    if mid not in failed and find_filelist_root(core.local_mods_dir / mid):
+                        item["update_status"] = "OK"
+                        missing_count -= 1
+                        self.store.mark_mod_updated(mid, int(item.get("time_updated", 0) or 0))
+                    else:
+                        item["update_status"] = "MISSING"
 
             source = {
                 "format": "Barotrauma ModList",
@@ -4675,6 +4719,7 @@ class ModManagerGUI(tk.Tk):
                 "pack_format": BUILD_PACK_FORMAT_VERSION,
                 "description": pack["description"],
                 "source_profile": pack["source_profile"],
+                "steam_collection_id": pack.get("steam_collection_id", ""),
                 "pack_created_at": pack["created_at"],
             }
             self.store.create_profile(profile_name, imported, source=source, activate=True)
@@ -4683,6 +4728,8 @@ class ModManagerGUI(tk.Tk):
                 f"[Build] Импортирована сборка «{pack['name']}»: {imported_count} модов; "
                 f"отсутствуют локально: {missing_count}. Авторский порядок сохранён."
             )
+            if failed:
+                self._report_failed(failed, {str(item["id"]): item for item in imported})
         except Exception as exc:
             error = str(exc)
             self.log(f"[ОШИБКА Build] {error}")
@@ -4693,6 +4740,7 @@ class ModManagerGUI(tk.Tk):
                 self._refresh_mod_listbox()
                 self._refresh_workshop_card_states()
                 self._update_profile_order_indicator()
+                self.refresh_build_library()
                 self._set_profile_job(False)
                 if error:
                     messagebox.showerror("Импорт сборки", error, parent=self)
@@ -4700,7 +4748,8 @@ class ModManagerGUI(tk.Tk):
                     import_summary = (
                         f"{self._tr('Создан профиль: ')}{profile_name}\n"
                         f"{self._tr('Модов в сборке: ')}{imported_count}\n"
-                        f"{self._tr('Файлов модов пока нет локально: ')}{missing_count}\n\n"
+                        f"{self._tr('Файлов модов пока нет локально: ')}{missing_count}\n"
+                        f"{self._tr('Не удалось загрузить: ')}{len(failed)}\n\n"
                         f"{self._tr('Список и порядок сохранены. Нажми «Проверить», чтобы загрузить отсутствующие моды.')}"
                     )
                     messagebox.showinfo(
