@@ -48,6 +48,25 @@ with tempfile.TemporaryDirectory() as config_tmp:
         assert loaded.data['active_profile'] == 'Second'
         assert loaded.get_active_mods()[0]['id'] == '1234567890'
 
+    # Imported builds create a separate profile and never overwrite an existing one.
+    with tempfile.TemporaryDirectory() as tmp:
+        store = mod.ProfileStore(Path(tmp) / "profiles.json")
+        store.create_profile(
+            "Shared Build",
+            [{"id": "1234567890", "title": "Build Mod"}],
+            source={"format": "Barotrauma ModList", "order_mode": "author"},
+            activate=True,
+        )
+        assert store.data["active_profile"] == "Shared Build"
+        assert store.get_profile_mods("Shared Build")[0]["id"] == "1234567890"
+        try:
+            store.create_profile("Shared Build", [{"id": "1234567891"}], activate=True)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Creating a duplicate profile should fail")
+        assert store.get_profile_mods("Shared Build")[0]["id"] == "1234567890"
+
     # ZIP extraction supports normal files and rejects Zip Slip.
     with tempfile.TemporaryDirectory() as tmp:
         valid_zip = io.BytesIO()
@@ -149,8 +168,9 @@ with tempfile.TemporaryDirectory() as config_tmp:
     assert [item["id"] for item in build_pack["mods"]] == [
         "2559634234", "1234567890", "1234567891"
     ]
-    pack_path = Path(tmp) / "shared.bmm-pack"
-    pack_path.write_bytes(build_payload)
+    with tempfile.TemporaryDirectory() as pack_tmp:
+        pack_path = Path(pack_tmp) / "shared.bmm-pack"
+        pack_path.write_bytes(build_payload)
     assert mod.read_build_pack(pack_path)["name"] == "My Shared Build"
 
     # Build packs reject extra files instead of extracting arbitrary archive contents.
@@ -196,6 +216,33 @@ with tempfile.TemporaryDirectory() as config_tmp:
         pass
     else:
         raise AssertionError("Build pack with mismatched manifest and ModList was accepted")
+
+    # Duplicate Workshop entries in the embedded XML are rejected.
+    duplicate_xml_payload = io.BytesIO()
+    duplicate_manifest = {
+        "format": mod.BUILD_PACK_FORMAT,
+        "format_version": mod.BUILD_PACK_FORMAT_VERSION,
+        "name": "Duplicate XML",
+        "description": "",
+        "source_profile": "",
+        "created_at": "",
+        "mod_count": 1,
+        "mods": [{"id": "1234567890", "title": "Test"}],
+    }
+    with zipfile.ZipFile(duplicate_xml_payload, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("manifest.json", json.dumps(duplicate_manifest))
+        zf.writestr(
+            "ModList.xml",
+            '<mods name="Duplicate XML"><Vanilla/>'
+            '<Workshop name="First" id="1234567890"/>'
+            '<Workshop name="Duplicate" id="1234567890"/></mods>',
+        )
+    try:
+        mod.parse_build_pack_bytes(duplicate_xml_payload.getvalue())
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Build pack with duplicate XML IDs was accepted")
 
     # Duplicate IDs must not be silently dropped during build export.
     try:
