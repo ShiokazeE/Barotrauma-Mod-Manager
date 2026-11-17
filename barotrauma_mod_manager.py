@@ -4286,7 +4286,7 @@ class ModManagerGUI(tk.Tk):
             )
             return
 
-        safe_name = re.sub(r"[\\/:*?""<>|]+", "_", build_name).strip(" ._") or "Barotrauma_Build"
+        safe_name = re.sub(r'[\\/:*?"<>|]+', "_", build_name).strip(" ._") or "Barotrauma_Build"
         selected_path = filedialog.asksaveasfilename(
             parent=self,
             title="Сохранить сборку",
