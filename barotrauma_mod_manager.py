@@ -5279,8 +5279,8 @@ class ModManagerGUI(tk.Tk):
                 if not edge_count and not added_ids and (unavailable or truncated):
                     messagebox.showwarning(
                         "Проверка неполная",
-                        "\\n".join(status_lines)
-                        + "\\n\\nSteam не вернул полные данные о зависимостях. Список модов не изменён.",
+                        "\n".join(status_lines)
+                        + "\n\nSteam не вернул полные данные о зависимостях. Список модов не изменён.",
                         parent=self,
                     )
                     return
@@ -5301,8 +5301,8 @@ class ModManagerGUI(tk.Tk):
                 if not added_ids and not known_relationships_changed:
                     messagebox.showinfo(
                         "Проверка зависимостей",
-                        "\\n".join(status_lines)
-                        + "\\n\\nНовых обязательных элементов нет. Состав и порядок не изменены.",
+                        "\n".join(status_lines)
+                        + "\n\nНовых обязательных элементов нет. Состав и порядок не изменены.",
                         parent=self,
                     )
                     return
@@ -5322,12 +5322,12 @@ class ModManagerGUI(tk.Tk):
                     if added_ids else
                     "Обновить метаданные зависимостей и порядок существующих модов?"
                 )
-                summary = "\\n".join(status_lines)
+                summary = "\n".join(status_lines)
                 if added_preview:
-                    summary += "\\n\\n" + "\\n".join(added_preview)
+                    summary += "\n\n" + "\n".join(added_preview)
                 if unavailable or truncated:
-                    summary += "\\n\\nПроверка частичная. Недоступные элементы не будут считаться проверенными."
-                summary += "\\n\\n" + action_text
+                    summary += "\n\nПроверка частичная. Недоступные элементы не будут считаться проверенными."
+                summary += "\n\n" + action_text
 
                 if not messagebox.askyesno(
                     "Найденные зависимости",
@@ -5377,9 +5377,9 @@ class ModManagerGUI(tk.Tk):
                     )
                     messagebox.showinfo(
                         "Зависимости сохранены",
-                        f"Новых обязательных ID добавлено: {len(added_ids)}\\n"
-                        f"Модов в списке: {len(merged_mods)}\\n"
-                        f"Файлов модов отсутствует локально: {missing_count}\\n\\n"
+                        f"Новых обязательных ID добавлено: {len(added_ids)}\n"
+                        f"Модов в списке: {len(merged_mods)}\n"
+                        f"Файлов модов отсутствует локально: {missing_count}\n\n"
                         "Нажми «ПРОВЕРИТЬ» для загрузки отсутствующих модов либо используй "
                         "«УСТАНОВИТЬ НЕДОСТАЮЩИЕ» в библиотеке сборок.",
                         parent=self,
@@ -5730,7 +5730,9 @@ class ModManagerGUI(tk.Tk):
                 # Pack titles and order are authoritative; online metadata fills in extra fields only.
                 merged["id"] = mid
                 merged["title"] = str(parsed.get("title") or merged.get("title") or f"Workshop_{mid}")
-                merged.setdefault("dependencies", [])
+                merged["dependencies"] = list(
+                    parsed.get("dependencies", merged.get("dependencies", [])) or []
+                )
                 merged["author_order"] = index
                 try:
                     installed = bool(
