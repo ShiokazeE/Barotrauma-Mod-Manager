@@ -495,8 +495,8 @@ def validate_profile_packages(mods: list[dict], local_mods_dir: Path) -> list[st
             errors.append(f"Повторяющийся Workshop ID: {mod_id}.")
             continue
         seen.add(mod_id)
-        filelist = find_filelist_root(Path(local_mods_dir) / mod_id)
-        if filelist is None:
+        filelist = Path(local_mods_dir) / mod_id / "filelist.xml"
+        if not filelist.is_file():
             errors.append(f"{mod.get('title') or mod_id}: локальный filelist.xml не найден.")
             continue
         try:
@@ -741,7 +741,14 @@ class ProfileStore:
         if not isinstance(current, list) or not current:
             return False
         history = self.data.setdefault("profile_history", {}).setdefault(profile_name, [])
-        snapshot = [dict(mod) for mod in current if isinstance(mod, dict)]
+        history_fields = (
+            "id", "title", "dependencies", "update_status", "author_order",
+            "tier_label", "time_updated", "api_error",
+        )
+        snapshot = [
+            {key: mod[key] for key in history_fields if key in mod}
+            for mod in current if isinstance(mod, dict)
+        ]
         if history and history[-1].get("mods") == snapshot:
             return False
         history.append({
@@ -4631,6 +4638,8 @@ class ModManagerGUI(tk.Tk):
                 pass
 
     def edit_selected_build(self):
+        if self._profile_job_running:
+            return
         selected = self._selected_build_entries()
         if len(selected) != 1:
             messagebox.showinfo("Библиотека сборок", "Выбери одну сборку для редактирования.", parent=self)
@@ -4679,6 +4688,8 @@ class ModManagerGUI(tk.Tk):
             messagebox.showerror("Редактирование сборки", str(exc), parent=self)
 
     def delete_selected_build(self):
+        if self._profile_job_running:
+            return
         selected = self._selected_build_entries()
         if len(selected) != 1:
             messagebox.showinfo("Библиотека сборок", "Выбери одну сборку для удаления.", parent=self)
@@ -4770,9 +4781,9 @@ class ModManagerGUI(tk.Tk):
         left_titles = {str(item.get("id")): str(item.get("title", item.get("id"))) for item in left_mods}
         right_titles = {str(item.get("id")): str(item.get("title", item.get("id"))) for item in right_mods}
         for mod_id in comparison["only_left"]:
-            left_box.insert(tk.END, f"{left_titles.get(mod_id, mod_id)}\\n{mod_id}\\n\\n")
+            left_box.insert(tk.END, f"{left_titles.get(mod_id, mod_id)}\n{mod_id}\n\n")
         for mod_id in comparison["only_right"]:
-            right_box.insert(tk.END, f"{right_titles.get(mod_id, mod_id)}\\n{mod_id}\\n\\n")
+            right_box.insert(tk.END, f"{right_titles.get(mod_id, mod_id)}\n{mod_id}\n\n")
         left_box.config(state="disabled")
         right_box.config(state="disabled")
         tk.Button(dialog, text="ЗАКРЫТЬ", command=dialog.destroy, bg=PANEL_ALT, fg=TEXT,
@@ -4815,6 +4826,11 @@ class ModManagerGUI(tk.Tk):
                     if error:
                         messagebox.showerror("Steam Collection", error, parent=self)
                     else:
+                        self._show_mod_comparison(
+                            entry["name"], entry["mods"],
+                            f"Steam Collection #{collection_id}",
+                            [{"id": mid, "title": mid} for mid in collection_ids],
+                        )
                         message = (
                             f"В файле сборки: {result['left_count']}\\n"
                             f"В Steam Collection: {result['right_count']}\\n"
@@ -4824,7 +4840,7 @@ class ModManagerGUI(tk.Tk):
                             + ("Порядок общих модов совпадает." if result["same_order"] else
                                "Порядок отличается или в коллекции изменён состав.")
                         )
-                        messagebox.showinfo("Проверка Steam Collection", message, parent=self)
+                        self.log(f"[Build] Steam Collection #{collection_id}: {message.replace(chr(10), ' · ')}")
                 self.after(0, finish)
 
         threading.Thread(target=worker, daemon=True).start()
@@ -4900,7 +4916,7 @@ class ModManagerGUI(tk.Tk):
             left_mods = self.store.get_active_mods()
         server_text = simpledialog.askstring(
             "Сравнение с сервером",
-            "Вставь только Workshop Mod IDs из настроек сервера (через запятую или через запятую или пробел).\\n"
+            "Вставь только Workshop Mod IDs из настроек сервера (через запятую или пробел).\n"
             "Не вставляй порт или другие параметры сервера.",
             parent=self,
         )
@@ -4916,6 +4932,8 @@ class ModManagerGUI(tk.Tk):
         )
 
     def show_profile_history(self):
+        if self._profile_job_running:
+            return
         profile_name = str(self.store.data.get("active_profile", ""))
         entries = self.store.get_profile_history(profile_name)
         dialog = tk.Toplevel(self)
@@ -5158,10 +5176,14 @@ class ModManagerGUI(tk.Tk):
 
             if download_missing and missing_ids:
                 self.log(f"[Build] Запускаю загрузку {len(missing_ids)} отсутствующих модов...")
-                failed = core.acquire_mods(
-                    missing_ids,
-                    metadata={mid: remote_meta.get(mid, {}) for mid in missing_ids},
-                )
+                try:
+                    failed = core.acquire_mods(
+                        missing_ids,
+                        metadata={mid: remote_meta.get(mid, {}) for mid in missing_ids},
+                    )
+                except Exception as download_error:
+                    failed = {mid: str(download_error) for mid in missing_ids}
+                    self.log(f"[Build] Загрузка завершилась ошибкой; профиль будет создан с отсутствующими модами: {download_error}")
                 for item in imported:
                     mid = str(item["id"])
                     if mid not in missing_ids:
