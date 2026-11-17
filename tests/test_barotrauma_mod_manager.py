@@ -67,6 +67,56 @@ with tempfile.TemporaryDirectory() as config_tmp:
             raise AssertionError("Creating a duplicate profile should fail")
         assert store.get_profile_mods("Shared Build")[0]["id"] == "1234567890"
 
+    # Build and server list comparisons preserve order and detect both differences.
+    comparison = mod.compare_mod_lists(
+        ["1234567890", "1234567891", "1234567892"],
+        ["1234567891", "1234567890", "1234567893"],
+    )
+    assert comparison["only_left"] == ["1234567892"]
+    assert comparison["only_right"] == ["1234567893"]
+    assert comparison["same_order"] is False
+    assert comparison["common_count"] == 2
+    assert mod.parse_server_workshop_ids("1234567890, 1234567891\n1234567892") == [
+        "1234567890", "1234567891", "1234567892"
+    ]
+    try:
+        mod.parse_server_workshop_ids("1234567890, 27015")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("A non-Workshop server setting was accepted as a mod ID")
+
+    # Build and profile history saves the previous state before replacing it and restores atomically.
+    with tempfile.TemporaryDirectory() as tmp:
+        store = mod.ProfileStore(Path(tmp) / "profiles.json")
+        store.set_active_mods([
+            {"id": "1234567890", "title": "Before"},
+            {"id": "1234567891", "title": "Second"},
+        ])
+        store.set_profile_mods("Основной", [{"id": "1234567892", "title": "After"}])
+        history = store.get_profile_history("Основной")
+        assert len(history) == 1
+        assert [item["id"] for item in history[0]["mods"]] == ["1234567890", "1234567891"]
+        store.restore_profile_snapshot("Основной", 0)
+        assert [item["id"] for item in store.get_active_mods()] == ["1234567890", "1234567891"]
+        restored_store = mod.ProfileStore(Path(tmp) / "profiles.json")
+        assert restored_store.get_active_mods()[0]["title"] == "Before"
+        assert len(restored_store.get_profile_history("Основной")) == 2
+
+    # Build library index keeps valid packs and reports malformed files without deleting them.
+    with tempfile.TemporaryDirectory() as tmp:
+        directory = Path(tmp)
+        good_pack = directory / "good.bmm-pack"
+        good_pack.write_bytes(mod.serialize_build_pack(
+            [{"id": "1234567890", "title": "Test"}], "Indexed Build"
+        ))
+        bad_pack = directory / "bad.bmm-pack"
+        bad_pack.write_bytes(b"not a zip")
+        valid, invalid = mod.list_build_packs(directory)
+        assert len(valid) == 1 and valid[0]["name"] == "Indexed Build"
+        assert invalid == [bad_pack]
+        assert bad_pack.exists()
+
     # ZIP extraction supports normal files and rejects Zip Slip.
     with tempfile.TemporaryDirectory() as tmp:
         valid_zip = io.BytesIO()
@@ -158,12 +208,14 @@ with tempfile.TemporaryDirectory() as config_tmp:
 
     # Portable build packs round-trip metadata and preserve the exact ModList order.
     build_payload = mod.serialize_build_pack(
-        parsed, "My Shared Build", "A short campaign preset", source_profile="Main"
+        parsed, "My Shared Build", "A short campaign preset",
+        source_profile="Main", steam_collection_id="1234509876",
     )
     build_pack = mod.parse_build_pack_bytes(build_payload)
     assert build_pack["name"] == "My Shared Build"
     assert build_pack["description"] == "A short campaign preset"
     assert build_pack["source_profile"] == "Main"
+    assert build_pack["steam_collection_id"] == "1234509876"
     assert build_pack["mod_count"] == 3
     assert [item["id"] for item in build_pack["mods"]] == [
         "2559634234", "1234567890", "1234567891"
