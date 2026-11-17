@@ -16,7 +16,7 @@ import time
 import xml.etree.ElementTree as ET
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from urllib.parse import parse_qs, urljoin, urlparse
 import tkinter as tk
@@ -60,6 +60,7 @@ APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
 STATE_FILE = APP_DATA_DIR / "baro_profiles.json"
 LANGUAGE_FILE = APP_DATA_DIR / "language.json"
 STEAM_API_KEY_FILE = APP_DATA_DIR / "steam_api_key.dpapi"
+BUILD_PACKS_DIR = APP_DATA_DIR / "Builds"
 LEGACY_STATE_FILE = APP_DIR / "baro_profiles.json"
 if not STATE_FILE.exists() and LEGACY_STATE_FILE.exists():
     try:
@@ -104,6 +105,10 @@ UTILITY_KEYWORDS = (
 )
 MODLIST_MAX_BYTES = 5 * 1024 * 1024
 MODLIST_MAX_ITEMS = 2000
+BUILD_PACK_MAX_BYTES = 8 * 1024 * 1024
+BUILD_PACK_FORMAT = "barotrauma-mod-manager-pack"
+BUILD_PACK_FORMAT_VERSION = 1
+BUILD_PACK_MAX_DESCRIPTION = 2000
 
 
 def safe_extract_zip(zf: zipfile.ZipFile, destination: Path,
@@ -190,13 +195,12 @@ def find_filelist_root(path: Path, max_depth: int = 4) -> Path | None:
     return None
 
 
-def parse_barotrauma_modlist(xml_path: Path) -> tuple[str, list[dict]]:
-    """Parse a Barotrauma ModLists preset (<mods><Vanilla/><Workshop .../></mods>)."""
-    xml_path = Path(xml_path)
-    size = xml_path.stat().st_size
-    if size <= 0 or size > MODLIST_MAX_BYTES:
+def parse_barotrauma_modlist_bytes(
+    raw: bytes, fallback_name: str = "Barotrauma ModList", reject_duplicates: bool = False,
+) -> tuple[str, list[dict]]:
+    """Parse a native Barotrauma ModLists XML payload without writing it to disk."""
+    if not raw or len(raw) > MODLIST_MAX_BYTES:
         raise ValueError("Размер XML-файла пустой или превышает 5 МБ.")
-    raw = xml_path.read_bytes()
     upper = raw.upper()
     if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
         raise ValueError("DTD и пользовательские XML-сущности в пресетах запрещены.")
@@ -210,18 +214,26 @@ def parse_barotrauma_modlist(xml_path: Path) -> tuple[str, list[dict]]:
     if root_tag != "mods":
         raise ValueError("Это не пресет Barotrauma: ожидается корневой элемент <mods>.")
 
-    preset_name = str(root.attrib.get("name") or xml_path.stem).strip()[:100]
+    preset_name = str(root.attrib.get("name") or fallback_name).strip()[:100]
     result: list[dict] = []
     seen: set[str] = set()
     for child in list(root):
         tag = str(child.tag).split("}")[-1].casefold()
-        if tag != "workshop":
+        if tag == "vanilla":
             # <Vanilla/> is the game's base package and is not a Workshop item.
+            continue
+        if tag != "workshop":
+            if reject_duplicates:
+                raise ValueError(f"Недопустимый элемент в ModList.xml: {tag}")
             continue
         mod_id = str(child.attrib.get("id", "")).strip()
         if not mod_id.isdigit() or not (5 <= len(mod_id) <= 20):
+            if reject_duplicates:
+                raise ValueError(f"Некорректный Workshop ID в ModList.xml: {mod_id or '(empty)'}")
             continue
         if mod_id in seen:
+            if reject_duplicates:
+                raise ValueError(f"Повторяющийся Workshop ID в ModList.xml: {mod_id}")
             continue
         seen.add(mod_id)
         title = str(child.attrib.get("name") or f"Workshop_{mod_id}").strip()
@@ -233,6 +245,155 @@ def parse_barotrauma_modlist(xml_path: Path) -> tuple[str, list[dict]]:
     if not result:
         raise ValueError("В XML не найдено ни одного корректного элемента <Workshop id=.../>.")
     return preset_name, result
+
+
+def parse_barotrauma_modlist(xml_path: Path) -> tuple[str, list[dict]]:
+    """Parse a Barotrauma ModLists preset (<mods><Vanilla/><Workshop .../></mods>)."""
+    xml_path = Path(xml_path)
+    size = xml_path.stat().st_size
+    if size <= 0 or size > MODLIST_MAX_BYTES:
+        raise ValueError("Размер XML-файла пустой или превышает 5 МБ.")
+    return parse_barotrauma_modlist_bytes(xml_path.read_bytes(), xml_path.stem)
+
+
+def serialize_build_pack(
+    mods: list[dict],
+    build_name: str,
+    description: str = "",
+    source_profile: str = "",
+) -> bytes:
+    """Create a small shareable pack containing metadata and the native ordered ModList."""
+    name = str(build_name or "").strip()
+    description = str(description or "").strip()
+    if not name or len(name) > 40:
+        raise ValueError("Название сборки должно содержать от 1 до 40 символов.")
+    if len(description) > BUILD_PACK_MAX_DESCRIPTION:
+        raise ValueError(f"Описание сборки не должно превышать {BUILD_PACK_MAX_DESCRIPTION} символов.")
+    if not isinstance(mods, list) or not mods or len(mods) > MODLIST_MAX_ITEMS:
+        raise ValueError(f"Сборка должна содержать от 1 до {MODLIST_MAX_ITEMS} модов.")
+
+    manifest_mods = []
+    seen: set[str] = set()
+    for mod in mods:
+        if not isinstance(mod, dict):
+            raise ValueError("В профиле обнаружена некорректная запись мода.")
+        mod_id = str(mod.get("id", "")).strip()
+        if not mod_id.isdigit() or not (5 <= len(mod_id) <= 20) or mod_id in seen:
+            raise ValueError(f"Некорректный или повторяющийся Workshop ID: {mod_id or '(empty)'}")
+        seen.add(mod_id)
+        title = str(mod.get("title") or f"Workshop_{mod_id}").replace("\r", " ").replace("\n", " ").strip()[:200]
+        manifest_mods.append({"id": mod_id, "title": title or f"Workshop_{mod_id}"})
+
+    modlist_xml = serialize_barotrauma_modlist(mods, name)
+    manifest = {
+        "format": BUILD_PACK_FORMAT,
+        "format_version": BUILD_PACK_FORMAT_VERSION,
+        "name": name,
+        "description": description,
+        "source_profile": str(source_profile or "")[:100],
+        "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "mod_count": len(manifest_mods),
+        "mods": manifest_mods,
+    }
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+        archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"))
+        archive.writestr("ModList.xml", modlist_xml)
+    payload = output.getvalue()
+    if len(payload) > BUILD_PACK_MAX_BYTES:
+        raise ValueError("Сборка слишком большая для формата .bmm-pack.")
+    return payload
+
+
+def parse_build_pack_bytes(payload: bytes) -> dict:
+    """Validate and read a .bmm-pack archive. No archive paths are ever extracted."""
+    if not isinstance(payload, (bytes, bytearray)) or not payload or len(payload) > BUILD_PACK_MAX_BYTES:
+        raise ValueError("Файл сборки пустой или превышает допустимый размер.")
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(payload), "r") as archive:
+            infos = archive.infolist()
+            expected_names = {"manifest.json", "ModList.xml"}
+            names = [info.filename for info in infos]
+            if len(infos) != 2 or len(set(names)) != 2 or set(names) != expected_names:
+                raise ValueError("В .bmm-pack должны находиться только manifest.json и ModList.xml.")
+            total_size = 0
+            for info in infos:
+                mode = (info.external_attr >> 16) & 0xFFFF
+                if info.is_dir() or info.flag_bits & 0x1 or stat.S_ISLNK(mode):
+                    raise ValueError("Папки, ссылки и зашифрованные элементы в .bmm-pack запрещены.")
+                if "/" in info.filename or "\\" in info.filename or ":" in info.filename:
+                    raise ValueError("В .bmm-pack найден недопустимый путь.")
+                if info.file_size < 0 or info.file_size > MODLIST_MAX_BYTES:
+                    raise ValueError("Один из файлов сборки превышает допустимый размер.")
+                total_size += info.file_size
+                if total_size > BUILD_PACK_MAX_BYTES:
+                    raise ValueError("Распакованный .bmm-pack превышает допустимый размер.")
+            manifest_raw = archive.read("manifest.json")
+            modlist_raw = archive.read("ModList.xml")
+    except ValueError:
+        raise
+    except (zipfile.BadZipFile, OSError, RuntimeError, KeyError) as exc:
+        raise ValueError(f"Не удалось прочитать .bmm-pack: {exc}") from exc
+
+    try:
+        manifest = json.loads(manifest_raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("manifest.json содержит некорректный JSON или UTF-8.") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError("Некорректный manifest.json.")
+    if manifest.get("format") != BUILD_PACK_FORMAT:
+        raise ValueError("Это не сборка Barotrauma Mod Manager.")
+    if type(manifest.get("format_version")) is not int or manifest["format_version"] != BUILD_PACK_FORMAT_VERSION:
+        raise ValueError(f"Неподдерживаемая версия формата сборки: {manifest.get('format_version')!r}.")
+
+    name = manifest.get("name")
+    description = manifest.get("description", "")
+    mods_data = manifest.get("mods")
+    if not isinstance(name, str) or not name.strip() or len(name.strip()) > 40:
+        raise ValueError("Название сборки в manifest.json некорректно.")
+    if not isinstance(description, str) or len(description) > BUILD_PACK_MAX_DESCRIPTION:
+        raise ValueError("Описание сборки в manifest.json некорректно.")
+    if not isinstance(mods_data, list) or not 1 <= len(mods_data) <= MODLIST_MAX_ITEMS:
+        raise ValueError("Состав сборки в manifest.json некорректен.")
+    manifest_ids = []
+    for item in mods_data:
+        if not isinstance(item, dict):
+            raise ValueError("Некорректная запись мода в manifest.json.")
+        mod_id = str(item.get("id", "")).strip()
+        title = item.get("title", "")
+        if not mod_id.isdigit() or not (5 <= len(mod_id) <= 20) or mod_id in manifest_ids:
+            raise ValueError("manifest.json содержит недопустимый или повторяющийся Workshop ID.")
+        if not isinstance(title, str) or len(title) > 200:
+            raise ValueError("Некорректное название мода в manifest.json.")
+        manifest_ids.append(mod_id)
+
+    modlist_name, parsed_mods = parse_barotrauma_modlist_bytes(
+        modlist_raw, name, reject_duplicates=True,
+    )
+    xml_ids = [str(item["id"]) for item in parsed_mods]
+    if manifest_ids != xml_ids:
+        raise ValueError("Список модов в manifest.json не совпадает с порядком в ModList.xml.")
+    if type(manifest.get("mod_count")) is not int or manifest["mod_count"] != len(manifest_ids):
+        raise ValueError("Количество модов в manifest.json не совпадает с фактическим составом.")
+    return {
+        "name": name.strip(),
+        "description": description.strip(),
+        "source_profile": str(manifest.get("source_profile", ""))[:100],
+        "created_at": str(manifest.get("created_at", ""))[:64],
+        "mods": parsed_mods,
+        "mod_count": len(parsed_mods),
+        "modlist_name": modlist_name,
+    }
+
+
+def read_build_pack(path: Path) -> dict:
+    """Read a .bmm-pack file while enforcing the compressed file-size limit."""
+    path = Path(path)
+    size = path.stat().st_size
+    if size <= 0 or size > BUILD_PACK_MAX_BYTES:
+        raise ValueError("Файл сборки пустой или превышает допустимый размер.")
+    return parse_build_pack_bytes(path.read_bytes())
 
 
 def serialize_barotrauma_modlist(mods: list[dict], preset_name: str) -> bytes:
@@ -462,6 +623,26 @@ class ProfileStore:
         with self._lock:
             source = self.data.setdefault("profile_sources", {}).get(profile_name, {})
             return dict(source) if isinstance(source, dict) else {}
+
+    def create_profile(
+        self, profile_name: str, mods: list[dict], source: dict | None = None,
+        activate: bool = False,
+    ) -> None:
+        """Atomically add a new profile without replacing any existing profile."""
+        name = str(profile_name or "").strip()
+        if not name or len(name) > 40:
+            raise ValueError("Название профиля должно содержать от 1 до 40 символов.")
+        if not isinstance(mods, list):
+            raise ValueError("Состав профиля должен быть списком модов.")
+        with self._lock:
+            if name in self.data["profiles"]:
+                raise ValueError(f"Профиль «{name}» уже существует.")
+            self.data["profiles"][name] = [dict(mod) for mod in mods]
+            if source is not None:
+                self.data.setdefault("profile_sources", {})[name] = dict(source)
+            if activate:
+                self.data["active_profile"] = name
+            self.save()
 
     def mark_mod_updated(self, mod_id: str, steam_time_updated: int):
         if steam_time_updated > 0:
@@ -2617,6 +2798,10 @@ class ModManagerGUI(tk.Tk):
                color="#263e52", hover="#31536d", track=True).pack(side="left", padx=(0, 5))
         button(list_toolbar, "ЭКСПОРТ XML", self.export_modlist_xml,
                color="#263e52", hover="#31536d", track=True).pack(side="left", padx=(0, 5))
+        button(list_toolbar, "СОХРАНИТЬ СБОРКУ", self.export_build_pack,
+               color="#315947", hover="#3d7059", track=True).pack(side="left", padx=(0, 5))
+        button(list_toolbar, "ИМПОРТ СБОРКИ", self.import_build_pack,
+               color="#315947", hover="#3d7059", track=True).pack(side="left", padx=(0, 5))
         button(list_toolbar, "ПРИМЕНИТЬ В ИГРУ", self.apply_active_profile_to_game,
                color=GREEN, hover="#22b889", track=True).pack(side="right")
 
@@ -4074,6 +4259,209 @@ class ModManagerGUI(tk.Tk):
             if game_dir.is_dir():
                 return game_dir
         return Path.home()
+
+    def _build_packs_directory(self) -> Path:
+        BUILD_PACKS_DIR.mkdir(parents=True, exist_ok=True)
+        return BUILD_PACKS_DIR
+
+    def export_build_pack(self):
+        """Save the active profile as one portable .bmm-pack file."""
+        if self._profile_job_running:
+            return
+        profile_name = str(self.store.data.get("active_profile", "Barotrauma Build"))
+        mods = self.store.get_profile_mods(profile_name)
+        if not mods:
+            messagebox.showinfo("Сборки", "Сначала добавь моды в профиль, затем сохраняй сборку.", parent=self)
+            return
+
+        build_name = simpledialog.askstring(
+            "Сохранить сборку", "Название сборки (до 40 символов):",
+            initialvalue=profile_name, parent=self,
+        )
+        if build_name is None:
+            return
+        build_name = build_name.strip()
+        if not build_name or len(build_name) > 40:
+            messagebox.showwarning("Сборки", "Название сборки должно содержать от 1 до 40 символов.", parent=self)
+            return
+
+        description = simpledialog.askstring(
+            "Описание сборки", "Краткое описание (необязательно):",
+            initialvalue="", parent=self,
+        )
+        if description is None:
+            return
+        if len(description.strip()) > BUILD_PACK_MAX_DESCRIPTION:
+            messagebox.showwarning(
+                "Сборки",
+                f"Описание не должно превышать {BUILD_PACK_MAX_DESCRIPTION} символов.",
+                parent=self,
+            )
+            return
+
+        safe_name = re.sub(r'[\\/:*?"<>|]+', "_", build_name).strip(" ._") or "Barotrauma_Build"
+        selected_path = filedialog.asksaveasfilename(
+            parent=self,
+            title=self._tr("Сохранить сборку"),
+            initialdir=str(self._build_packs_directory()),
+            initialfile=f"{safe_name}.bmm-pack",
+            defaultextension=".bmm-pack",
+            filetypes=(("Barotrauma Mod Manager pack", "*.bmm-pack"), ("Все файлы", "*.*")),
+        )
+        if not selected_path:
+            return
+
+        try:
+            payload = serialize_build_pack(
+                mods, build_name, description=description, source_profile=profile_name,
+            )
+            output = Path(selected_path)
+            if output.suffix.casefold() != ".bmm-pack":
+                output = output.with_suffix(".bmm-pack")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            temp = output.with_name(output.name + ".tmp")
+            temp.write_bytes(payload)
+            os.replace(temp, output)
+            messagebox.showinfo(
+                self._tr("Сборка сохранена"),
+                f"{self._tr('Сборка сохранена')}: {build_name}\n"
+                f"{self._tr('Модов: ')}{len(mods)}\n\n"
+                f"{self._tr('Файл можно передать другу: ')}{output}",
+                parent=self,
+            )
+            self.log(f"[Build] Экспортирована сборка «{build_name}»: {len(mods)} модов.")
+        except Exception as exc:
+            messagebox.showerror("Экспорт сборки", str(exc), parent=self)
+
+    def import_build_pack(self):
+        """Import a .bmm-pack into a new profile; existing profiles are never overwritten."""
+        if self._profile_job_running:
+            return
+        selected_path = filedialog.askopenfilename(
+            parent=self,
+            title=self._tr("Импорт сборки"),
+            initialdir=str(self._build_packs_directory()),
+            filetypes=(("Barotrauma Mod Manager pack", "*.bmm-pack"), ("Все файлы", "*.*")),
+        )
+        if not selected_path:
+            return
+        source_path = Path(selected_path)
+        try:
+            pack = read_build_pack(source_path)
+        except Exception as exc:
+            messagebox.showerror("Импорт сборки", str(exc), parent=self)
+            return
+
+        base_name = pack["name"][:40].strip() or "Imported Build"
+        target_name = base_name
+        suffix = 2
+        existing_names = set(self.store.data["profiles"])
+        while target_name in existing_names:
+            suffix_text = f" ({suffix})"
+            target_name = f"{base_name[:40 - len(suffix_text)].rstrip()}{suffix_text}"
+            suffix += 1
+
+        confirm_text = (
+            f"{self._tr('Сборка: ')}{pack['name']}\n"
+            f"{self._tr('Модов: ')}{pack['mod_count']}\n"
+            f"{self._tr('Описание: ')}{pack['description'] or '—'}\n\n"
+            f"{self._tr('Будет создан отдельный профиль: ')}{target_name}\n"
+            f"{self._tr('Существующие профили и файлы модов не изменятся. Продолжить?')}"
+        )
+        confirm = messagebox.askyesno(
+            self._tr("Импорт сборки"), confirm_text, parent=self,
+        )
+        if not confirm:
+            return
+
+        core = self._get_core()
+        self._set_profile_job(True)
+        threading.Thread(
+            target=self._worker_import_build_pack,
+            args=(core, pack, source_path.name, target_name),
+            daemon=True,
+        ).start()
+
+    def _worker_import_build_pack(self, core, pack, source_file: str, profile_name: str):
+        error = None
+        missing_count = 0
+        imported_count = 0
+        try:
+            parsed_mods = pack["mods"]
+            ids = [str(item["id"]) for item in parsed_mods]
+            remote_meta = {}
+            try:
+                remote_meta = core.fetch_mods_metadata(ids)
+            except Exception as metadata_error:
+                self.log(
+                    f"[Build] Не удалось получить метаданные Steam ({metadata_error}); "
+                    "импортирую список из файла сборки."
+                )
+
+            imported = []
+            for index, parsed in enumerate(parsed_mods):
+                mid = str(parsed["id"])
+                merged = dict(remote_meta.get(mid, {}))
+                # Pack titles and order are authoritative; online metadata fills in extra fields only.
+                merged["id"] = mid
+                merged["title"] = str(parsed.get("title") or merged.get("title") or f"Workshop_{mid}")
+                merged.setdefault("dependencies", [])
+                merged["author_order"] = index
+                try:
+                    installed = bool(
+                        find_filelist_root(core.local_mods_dir / mid) or core._find_source(mid)
+                    )
+                except (OSError, AttributeError):
+                    installed = False
+                if installed:
+                    merged["update_status"] = merged.get("update_status", "OK")
+                else:
+                    merged["update_status"] = "MISSING"
+                    missing_count += 1
+                imported.append(merged)
+
+            source = {
+                "format": "Barotrauma ModList",
+                "source_name": pack["name"],
+                "source_file": Path(source_file).name,
+                "order_mode": "author",
+                "ordered_ids": ids,
+                "imported_at": int(time.time()),
+                "pack_format": BUILD_PACK_FORMAT_VERSION,
+                "description": pack["description"],
+                "source_profile": pack["source_profile"],
+                "pack_created_at": pack["created_at"],
+            }
+            self.store.create_profile(profile_name, imported, source=source, activate=True)
+            imported_count = len(imported)
+            self.log(
+                f"[Build] Импортирована сборка «{pack['name']}»: {imported_count} модов; "
+                f"отсутствуют локально: {missing_count}. Авторский порядок сохранён."
+            )
+        except Exception as exc:
+            error = str(exc)
+            self.log(f"[ОШИБКА Build] {error}")
+
+        if not self._closing:
+            def finish():
+                self._refresh_profile_selector()
+                self._refresh_mod_listbox()
+                self._refresh_workshop_card_states()
+                self._update_profile_order_indicator()
+                self._set_profile_job(False)
+                if error:
+                    messagebox.showerror("Импорт сборки", error, parent=self)
+                else:
+                    import_summary = (
+                        f"{self._tr('Создан профиль: ')}{profile_name}\n"
+                        f"{self._tr('Модов в сборке: ')}{imported_count}\n"
+                        f"{self._tr('Файлов модов пока нет локально: ')}{missing_count}\n\n"
+                        f"{self._tr('Список и порядок сохранены. Нажми «Проверить», чтобы загрузить отсутствующие моды.')}"
+                    )
+                    messagebox.showinfo(
+                        self._tr("Сборка импортирована"), import_summary, parent=self,
+                    )
+            self.after(0, finish)
 
     def import_modlist_xml(self):
         """Import the author's native <mods><Vanilla/><Workshop/></mods> preset."""

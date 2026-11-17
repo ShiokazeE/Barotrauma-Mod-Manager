@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added the first portable `.bmm-pack` format containing build metadata and a native ordered ModList.
+- Added build export and import actions; imports create a new profile and never overwrite existing profiles.
+- Added archive validation, strict manifest/XML order checks and a per-user default Builds folder.
+
 - Added a one-click Steam API key paste button plus Ctrl+V and Shift+Insert shortcuts.
 - Clipboard contents are validated before insertion; saved keys continue to use Windows DPAPI encryption.
 

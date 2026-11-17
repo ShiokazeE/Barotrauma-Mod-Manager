@@ -48,6 +48,25 @@ with tempfile.TemporaryDirectory() as config_tmp:
         assert loaded.data['active_profile'] == 'Second'
         assert loaded.get_active_mods()[0]['id'] == '1234567890'
 
+    # Imported builds create a separate profile and never overwrite an existing one.
+    with tempfile.TemporaryDirectory() as tmp:
+        store = mod.ProfileStore(Path(tmp) / "profiles.json")
+        store.create_profile(
+            "Shared Build",
+            [{"id": "1234567890", "title": "Build Mod"}],
+            source={"format": "Barotrauma ModList", "order_mode": "author"},
+            activate=True,
+        )
+        assert store.data["active_profile"] == "Shared Build"
+        assert store.get_profile_mods("Shared Build")[0]["id"] == "1234567890"
+        try:
+            store.create_profile("Shared Build", [{"id": "1234567891"}], activate=True)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Creating a duplicate profile should fail")
+        assert store.get_profile_mods("Shared Build")[0]["id"] == "1234567890"
+
     # ZIP extraction supports normal files and rejects Zip Slip.
     with tempfile.TemporaryDirectory() as tmp:
         valid_zip = io.BytesIO()
@@ -136,6 +155,105 @@ with tempfile.TemporaryDirectory() as config_tmp:
             pass
         else:
             raise AssertionError('DTD/entity XML was accepted')
+
+    # Portable build packs round-trip metadata and preserve the exact ModList order.
+    build_payload = mod.serialize_build_pack(
+        parsed, "My Shared Build", "A short campaign preset", source_profile="Main"
+    )
+    build_pack = mod.parse_build_pack_bytes(build_payload)
+    assert build_pack["name"] == "My Shared Build"
+    assert build_pack["description"] == "A short campaign preset"
+    assert build_pack["source_profile"] == "Main"
+    assert build_pack["mod_count"] == 3
+    assert [item["id"] for item in build_pack["mods"]] == [
+        "2559634234", "1234567890", "1234567891"
+    ]
+    with tempfile.TemporaryDirectory() as pack_tmp:
+        pack_path = Path(pack_tmp) / "shared.bmm-pack"
+        pack_path.write_bytes(build_payload)
+        assert mod.read_build_pack(pack_path)["name"] == "My Shared Build"
+
+    # Build packs reject extra files instead of extracting arbitrary archive contents.
+    extra_payload = io.BytesIO()
+    with zipfile.ZipFile(extra_payload, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("manifest.json", json.dumps({
+            "format": mod.BUILD_PACK_FORMAT,
+            "format_version": mod.BUILD_PACK_FORMAT_VERSION,
+            "name": "Bad Pack",
+            "description": "",
+            "source_profile": "",
+            "created_at": "",
+            "mod_count": 1,
+            "mods": [{"id": "1234567890", "title": "Test"}],
+        }))
+        zf.writestr("ModList.xml", '<mods name="Bad Pack"><Vanilla/><Workshop name="Test" id="1234567890"/></mods>')
+        zf.writestr("../outside.txt", "not allowed")
+    try:
+        mod.parse_build_pack_bytes(extra_payload.getvalue())
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Build pack containing an extra path was accepted")
+
+    # The manifest cannot silently diverge from the authoritative XML load order.
+    mismatched_payload = io.BytesIO()
+    manifest = {
+        "format": mod.BUILD_PACK_FORMAT,
+        "format_version": mod.BUILD_PACK_FORMAT_VERSION,
+        "name": "Mismatch",
+        "description": "",
+        "source_profile": "",
+        "created_at": "",
+        "mod_count": 1,
+        "mods": [{"id": "1234567891", "title": "Wrong order"}],
+    }
+    with zipfile.ZipFile(mismatched_payload, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("manifest.json", json.dumps(manifest))
+        zf.writestr("ModList.xml", '<mods name="Mismatch"><Vanilla/><Workshop name="Other" id="1234567890"/></mods>')
+    try:
+        mod.parse_build_pack_bytes(mismatched_payload.getvalue())
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Build pack with mismatched manifest and ModList was accepted")
+
+    # Duplicate Workshop entries in the embedded XML are rejected.
+    duplicate_xml_payload = io.BytesIO()
+    duplicate_manifest = {
+        "format": mod.BUILD_PACK_FORMAT,
+        "format_version": mod.BUILD_PACK_FORMAT_VERSION,
+        "name": "Duplicate XML",
+        "description": "",
+        "source_profile": "",
+        "created_at": "",
+        "mod_count": 1,
+        "mods": [{"id": "1234567890", "title": "Test"}],
+    }
+    with zipfile.ZipFile(duplicate_xml_payload, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("manifest.json", json.dumps(duplicate_manifest))
+        zf.writestr(
+            "ModList.xml",
+            '<mods name="Duplicate XML"><Vanilla/>'
+            '<Workshop name="First" id="1234567890"/>'
+            '<Workshop name="Duplicate" id="1234567890"/></mods>',
+        )
+    try:
+        mod.parse_build_pack_bytes(duplicate_xml_payload.getvalue())
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Build pack with duplicate XML IDs was accepted")
+
+    # Duplicate IDs must not be silently dropped during build export.
+    try:
+        mod.serialize_build_pack(
+            [{"id": "1234567890", "title": "One"}, {"id": "1234567890", "title": "Duplicate"}],
+            "Duplicate Build",
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Duplicate Workshop IDs were accepted in a build pack")
 
     # Update checker must not compare filesystem mtime against Steam time_updated.
     with tempfile.TemporaryDirectory() as tmp:
