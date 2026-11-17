@@ -90,7 +90,26 @@ Save the active profile as one `.bmm-pack` file. It contains a manifest and the 
 
 When imported, the manager validates the manifest against the XML and creates a separate profile. Existing profiles and installed mod files are not overwritten. Mods that are not installed locally are marked as missing and must be downloaded through Steam Workshop.
 
-The default save location is `%LOCALAPPDATA%/BarotraumaModManager/Builds`; a different folder can be selected in the save dialog.
+All builds are stored in the local library at `%LOCALAPPDATA%/BarotraumaModManager/Builds`. When a pack is imported from another folder, the manager copies it into the library. From the library you can import a build, edit its metadata, delete only the pack file (not profiles or installed mods), or export a separate copy to share.
+
+### Build Library tools
+
+- **Compare** — compare two builds or a build with the active profile. The report shows missing/extra Workshop IDs, shared item count and differences in relative order.
+- **Steam Collection** — link a collection ID or URL, open it, and compare its current contents with the `.bmm-pack`. Nested collections use the existing Workshop resolver.
+- **Dependency check** — query child Workshop items through `IPublishedFileService/GetDetails` with `includechildren`. The manager displays detected required items and can insert them before their parent packages; Lua For Barotrauma remains first. Cycles stop the operation. Missing Steam data is reported as an incomplete check, never as proof that no dependencies exist.
+- **Install missing** — download items that are not installed locally using the existing Steam CDN / SteamCMD fallback and retry logic.
+- **Update from profile** — replace a saved build's contents with the active profile while keeping the name, description and linked Collection.
+- **Export copy** — write a separate `.bmm-pack` to a chosen location.
+
+### Preflight and profile history
+
+Before writing `config_player.xml`, the manager checks Workshop IDs, the presence of `LocalMods/<ID>/filelist.xml`, XML validity and the `contentpackage` root element. If a package is missing or malformed, the game configuration is left untouched. Potential XML conflicts are reported separately and the user can cancel application.
+
+Each profile keeps up to 25 snapshots of its mod list and order. History restores the previous list/order; it does not back up mod binaries or roll back downloaded mod versions.
+
+### Server comparison
+
+To compare with a server, paste only the Workshop ID list copied from the server settings, separated by commas or spaces. This compares the copied list; it does not connect to a live server or discover its mod list automatically.
 
 ## Load order and Barotrauma XML
 
