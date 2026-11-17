@@ -117,6 +117,104 @@ with tempfile.TemporaryDirectory() as config_tmp:
         assert invalid == [bad_pack]
         assert bad_pack.exists()
 
+    # Required Workshop children are inserted before their parent, transitively.
+    dependency_order, dependency_added = mod.merge_required_workshop_dependencies(
+        [
+            {"id": "1234567890", "title": "Parent"},
+            {"id": "2559634234", "title": "Lua For Barotrauma"},
+        ],
+        {
+            "1234567890": ["1234567891", "2559634234"],
+            "1234567891": ["1234567892"],
+            "1234567892": [],
+            "2559634234": [],
+        },
+        {
+            "1234567891": {"title": "Required child"},
+            "1234567892": {"title": "Transitive child"},
+        },
+    )
+    assert [item["id"] for item in dependency_order] == [
+        "2559634234", "1234567892", "1234567891", "1234567890"
+    ]
+    assert dependency_added == ["1234567892", "1234567891"]
+    assert dependency_order[-1]["dependencies"] == ["1234567891", "2559634234"]
+    try:
+        mod.merge_required_workshop_dependencies(
+            [{"id": "1234567890", "title": "Cycle A"}],
+            {"1234567890": ["1234567891"], "1234567891": ["1234567890"]},
+        )
+    except ValueError as exc:
+        assert "цикл" in str(exc).lower()
+    else:
+        raise AssertionError("Cyclic Workshop dependencies were accepted")
+
+    # Steam GetDetails uses the documented service input_json envelope and recursively returns children.
+    with tempfile.TemporaryDirectory() as tmp:
+        core = mod.BaroModManagerCore(tmp, "", log_callback=lambda _msg: None)
+
+        class DetailsResponse:
+            status_code = 200
+            def __init__(self, body):
+                self.body = body
+            def raise_for_status(self):
+                return None
+            def json(self):
+                return self.body
+
+        class DetailsSession:
+            def __init__(self):
+                self.calls = []
+            def get(self, url, params=None, timeout=None):
+                self.calls.append((url, dict(params or {}), timeout))
+                payload = json.loads(params["input_json"])
+                ids = payload["publishedfileids"]
+                details = []
+                for item_id in ids:
+                    children = (
+                        [{"publishedfileid": "1234567891"}]
+                        if item_id == "1234567890" else []
+                    )
+                    details.append({
+                        "publishedfileid": item_id,
+                        "result": 1,
+                        "consumer_app_id": int(mod.BAROTRAUMA_APP_ID),
+                        "children": children,
+                    })
+                return DetailsResponse({"response": {"publishedfiledetails": details}})
+
+        fake_details = DetailsSession()
+        core.session = fake_details
+        graph, unavailable, truncated = core.fetch_workshop_dependencies(
+            ["1234567890"], "A" * 32,
+        )
+        assert graph == {"1234567890": ["1234567891"], "1234567891": []}, graph
+        assert unavailable == []
+        assert truncated is False
+        assert fake_details.calls[0][1]["key"] == "A" * 32
+        assert json.loads(fake_details.calls[0][1]["input_json"]) == {
+            "publishedfileids": ["1234567890"], "includechildren": True,
+        }
+
+        class MissingChildrenSession:
+            def get(self, url, params=None, timeout=None):
+                payload = json.loads(params["input_json"])
+                item_id = payload["publishedfileids"][0]
+                return DetailsResponse({"response": {"publishedfiledetails": [{
+                    "publishedfileid": item_id,
+                    "result": 1,
+                    "consumer_app_id": int(mod.BAROTRAUMA_APP_ID),
+                    # Missing child field must be treated as unknown, not as no dependencies.
+                }]}})
+
+        core.session = MissingChildrenSession()
+        graph, unavailable, truncated = core.fetch_workshop_dependencies(
+            ["1234567890"], "A" * 32,
+        )
+        assert graph == {}
+        assert unavailable == ["1234567890"]
+        assert truncated is False
+
     # Preflight validates local manifests and reports missing or malformed package files.
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -242,6 +340,16 @@ with tempfile.TemporaryDirectory() as config_tmp:
     assert [item["id"] for item in build_pack["mods"]] == [
         "2559634234", "1234567890", "1234567891"
     ]
+    dependency_payload = mod.serialize_build_pack(
+        [
+            {"id": "1234567890", "title": "Parent", "dependencies": ["1234567891"]},
+            {"id": "1234567891", "title": "Required child", "dependencies": []},
+        ],
+        "Dependency Build",
+    )
+    dependency_pack = mod.parse_build_pack_bytes(dependency_payload)
+    assert dependency_pack["mods"][0]["dependencies"] == ["1234567891"]
+    assert dependency_pack["mods"][1]["dependencies"] == []
     with tempfile.TemporaryDirectory() as pack_tmp:
         pack_path = Path(pack_tmp) / "shared.bmm-pack"
         pack_path.write_bytes(build_payload)
