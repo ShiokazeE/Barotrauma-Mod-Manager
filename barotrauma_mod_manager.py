@@ -5298,7 +5298,10 @@ class ModManagerGUI(tk.Tk):
                     and list(item.get("dependencies", [])) != list(graph[str(item.get("id", ""))])
                     for item in merged_mods
                 )
-                if not added_ids and not known_relationships_changed:
+                original_order = [str(item.get("id", "")) for item in mods]
+                merged_order = [str(item.get("id", "")) for item in merged_mods]
+                order_changed = original_order != merged_order
+                if not added_ids and not known_relationships_changed and not order_changed:
                     messagebox.showinfo(
                         "Проверка зависимостей",
                         "\n".join(status_lines)
