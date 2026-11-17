@@ -219,11 +219,17 @@ def parse_barotrauma_modlist_bytes(
     seen: set[str] = set()
     for child in list(root):
         tag = str(child.tag).split("}")[-1].casefold()
-        if tag != "workshop":
+        if tag == "vanilla":
             # <Vanilla/> is the game's base package and is not a Workshop item.
+            continue
+        if tag != "workshop":
+            if reject_duplicates:
+                raise ValueError(f"Недопустимый элемент в ModList.xml: {tag}")
             continue
         mod_id = str(child.attrib.get("id", "")).strip()
         if not mod_id.isdigit() or not (5 <= len(mod_id) <= 20):
+            if reject_duplicates:
+                raise ValueError(f"Некорректный Workshop ID в ModList.xml: {mod_id or '(empty)'}")
             continue
         if mod_id in seen:
             if reject_duplicates:
@@ -313,8 +319,9 @@ def parse_build_pack_bytes(payload: bytes) -> dict:
                 raise ValueError("В .bmm-pack должны находиться только manifest.json и ModList.xml.")
             total_size = 0
             for info in infos:
-                if info.is_dir() or info.flag_bits & 0x1:
-                    raise ValueError("Папки и зашифрованные элементы в .bmm-pack запрещены.")
+                mode = (info.external_attr >> 16) & 0xFFFF
+                if info.is_dir() or info.flag_bits & 0x1 or stat.S_ISLNK(mode):
+                    raise ValueError("Папки, ссылки и зашифрованные элементы в .bmm-pack запрещены.")
                 if "/" in info.filename or "\\" in info.filename or ":" in info.filename:
                     raise ValueError("В .bmm-pack найден недопустимый путь.")
                 if info.file_size < 0 or info.file_size > MODLIST_MAX_BYTES:
