@@ -198,7 +198,7 @@ _EN = {
     "Создан профиль: ": "Created profile: ",
     "Модов в сборке: ": "Mods in build: ",
     "Файлов модов пока нет локально: ": "Mod files not installed locally yet: ",
-    "Список и порядок сохранены. Отсутствующие моды нужно загрузить через Workshop.": "The list and order are saved. Missing mods must be downloaded through Workshop.",
+    "Список и порядок сохранены. Нажми «Проверить», чтобы загрузить отсутствующие моды.": "The list and order are saved. Press Check Updates to download missing mods.",
     "Размер файла сборки пустой или превышает допустимый размер.": "The build file is empty or exceeds the size limit.",
     "Файл сборки пустой или превышает допустимый размер.": "The build file is empty or exceeds the size limit.",
     "В .bmm-pack должны находиться только manifest.json и ModList.xml.": "A .bmm-pack must contain only manifest.json and ModList.xml.",
