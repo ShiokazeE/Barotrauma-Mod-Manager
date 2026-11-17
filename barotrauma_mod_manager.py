@@ -261,6 +261,7 @@ def serialize_build_pack(
     build_name: str,
     description: str = "",
     source_profile: str = "",
+    steam_collection_id: str = "",
 ) -> bytes:
     """Create a small shareable pack containing metadata and the native ordered ModList."""
     name = str(build_name or "").strip()
@@ -282,15 +283,39 @@ def serialize_build_pack(
             raise ValueError(f"Некорректный или повторяющийся Workshop ID: {mod_id or '(empty)'}")
         seen.add(mod_id)
         title = str(mod.get("title") or f"Workshop_{mod_id}").replace("\r", " ").replace("\n", " ").strip()[:200]
-        manifest_mods.append({"id": mod_id, "title": title or f"Workshop_{mod_id}"})
+        raw_dependencies = mod.get("dependencies", [])
+        if not isinstance(raw_dependencies, list):
+            raise ValueError(f"Некорректный список зависимостей для Workshop ID {mod_id}.")
+        dependencies = []
+        for dependency in raw_dependencies:
+            dependency_id = str(dependency).strip()
+            if (
+                not dependency_id.isdigit()
+                or not (5 <= len(dependency_id) <= 20)
+                or dependency_id == mod_id
+            ):
+                raise ValueError(f"Некорректный ID зависимости для Workshop ID {mod_id}: {dependency_id}")
+            if dependency_id not in dependencies:
+                dependencies.append(dependency_id)
+        if len(dependencies) > 100:
+            raise ValueError(f"Слишком много зависимостей у Workshop ID {mod_id}.")
+        manifest_mods.append({
+            "id": mod_id,
+            "title": title or f"Workshop_{mod_id}",
+            "dependencies": dependencies,
+        })
 
     modlist_xml = serialize_barotrauma_modlist(mods, name)
+    collection_id = str(steam_collection_id or "").strip()
+    if collection_id and (not collection_id.isdigit() or not (5 <= len(collection_id) <= 20)):
+        raise ValueError("Steam Collection ID должен содержать от 5 до 20 цифр.")
     manifest = {
         "format": BUILD_PACK_FORMAT,
         "format_version": BUILD_PACK_FORMAT_VERSION,
         "name": name,
         "description": description,
         "source_profile": str(source_profile or "")[:100],
+        "steam_collection_id": collection_id,
         "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "mod_count": len(manifest_mods),
         "mods": manifest_mods,
@@ -366,7 +391,25 @@ def parse_build_pack_bytes(payload: bytes) -> dict:
             raise ValueError("manifest.json содержит недопустимый или повторяющийся Workshop ID.")
         if not isinstance(title, str) or len(title) > 200:
             raise ValueError("Некорректное название мода в manifest.json.")
+        dependencies = item.get("dependencies", [])
+        if not isinstance(dependencies, list) or len(dependencies) > 100:
+            raise ValueError("Некорректный список зависимостей в manifest.json.")
+        normalized_dependencies = []
+        for dependency in dependencies:
+            dependency_id = str(dependency).strip()
+            if (
+                not dependency_id.isdigit()
+                or not (5 <= len(dependency_id) <= 20)
+                or dependency_id == mod_id
+                or dependency_id in normalized_dependencies
+            ):
+                raise ValueError("manifest.json содержит некорректный Workshop dependency ID.")
+            normalized_dependencies.append(dependency_id)
         manifest_ids.append(mod_id)
+
+    collection_id = str(manifest.get("steam_collection_id", "") or "").strip()
+    if collection_id and (not collection_id.isdigit() or not (5 <= len(collection_id) <= 20)):
+        raise ValueError("Steam Collection ID в manifest.json некорректен.")
 
     modlist_name, parsed_mods = parse_barotrauma_modlist_bytes(
         modlist_raw, name, reject_duplicates=True,
@@ -374,12 +417,20 @@ def parse_build_pack_bytes(payload: bytes) -> dict:
     xml_ids = [str(item["id"]) for item in parsed_mods]
     if manifest_ids != xml_ids:
         raise ValueError("Список модов в manifest.json не совпадает с порядком в ModList.xml.")
+    manifest_by_id = {
+        str(item["id"]): item
+        for item in mods_data
+    }
+    for mod in parsed_mods:
+        dependency_ids = manifest_by_id[str(mod["id"])].get("dependencies", [])
+        mod["dependencies"] = [str(value) for value in dependency_ids]
     if type(manifest.get("mod_count")) is not int or manifest["mod_count"] != len(manifest_ids):
         raise ValueError("Количество модов в manifest.json не совпадает с фактическим составом.")
     return {
         "name": name.strip(),
         "description": description.strip(),
         "source_profile": str(manifest.get("source_profile", ""))[:100],
+        "steam_collection_id": collection_id,
         "created_at": str(manifest.get("created_at", ""))[:64],
         "mods": parsed_mods,
         "mod_count": len(parsed_mods),
@@ -394,6 +445,211 @@ def read_build_pack(path: Path) -> dict:
     if size <= 0 or size > BUILD_PACK_MAX_BYTES:
         raise ValueError("Файл сборки пустой или превышает допустимый размер.")
     return parse_build_pack_bytes(path.read_bytes())
+
+
+def compare_mod_lists(left_mods: list[dict] | list[str], right_mods: list[dict] | list[str]) -> dict:
+    """Compare two ordered Workshop ID lists without mutating either input."""
+    def ids(items):
+        result = []
+        for item in items:
+            value = item.get("id", "") if isinstance(item, dict) else item
+            mod_id = str(value).strip()
+            if mod_id.isdigit() and mod_id not in result:
+                result.append(mod_id)
+        return result
+
+    left = ids(left_mods)
+    right = ids(right_mods)
+    left_set, right_set = set(left), set(right)
+    common_left = [mid for mid in left if mid in right_set]
+    common_right = [mid for mid in right if mid in left_set]
+    return {
+        "only_left": [mid for mid in left if mid not in right_set],
+        "only_right": [mid for mid in right if mid not in left_set],
+        "same_order": common_left == common_right,
+        "left_count": len(left),
+        "right_count": len(right),
+        "common_count": len(left_set & right_set),
+    }
+
+
+def parse_server_workshop_ids(text: str) -> list[str]:
+    """Parse a copied Workshop-ID-only field from server settings."""
+    raw = str(text or "").strip()
+    if not raw:
+        raise ValueError("Список Workshop ID пуст.")
+    tokens = [token for token in re.split(r"[,;\s]+", raw) if token]
+    result = []
+    for token in tokens:
+        # Accept bare numeric IDs only: this prevents accidentally treating ports,
+        # server IDs, dates or unrelated config values as Workshop packages.
+        if not token.isdigit() or not (5 <= len(token) <= 20):
+            raise ValueError(f"Некорректное значение Workshop ID: {token}")
+        if token not in result:
+            result.append(token)
+    if not result:
+        raise ValueError("Не найдено ни одного Workshop ID.")
+    if len(result) > MODLIST_MAX_ITEMS:
+        raise ValueError(f"Список превышает {MODLIST_MAX_ITEMS} Workshop ID.")
+    return result
+
+
+def list_build_packs(directory: Path) -> tuple[list[dict], list[Path]]:
+    """Read the local Build Library. Invalid files are reported, never deleted."""
+    directory = Path(directory)
+    valid = []
+    invalid = []
+    if not directory.is_dir():
+        return valid, invalid
+    for path in sorted(directory.glob("*.bmm-pack"), key=lambda item: item.name.casefold()):
+        try:
+            pack = read_build_pack(path)
+            valid.append({
+                "path": path,
+                "name": pack["name"],
+                "description": pack["description"],
+                "mods": pack["mods"],
+                "mod_count": pack["mod_count"],
+                "steam_collection_id": pack.get("steam_collection_id", ""),
+                "created_at": pack.get("created_at", ""),
+                "modified_at": path.stat().st_mtime,
+            })
+        except (OSError, ValueError) as exc:
+            invalid.append(path)
+    return valid, invalid
+
+def merge_required_workshop_dependencies(
+    mods: list[dict],
+    dependency_graph: dict[str, list[str]],
+    metadata: dict[str, dict] | None = None,
+) -> tuple[list[dict], list[str]]:
+    """Add missing required Workshop children before their parents, preserving other order."""
+    metadata = metadata or {}
+    original = []
+    by_id: dict[str, dict] = {}
+    for item in mods:
+        if not isinstance(item, dict):
+            continue
+        mod_id = str(item.get("id", "")).strip()
+        if not mod_id.isdigit() or not (5 <= len(mod_id) <= 20):
+            continue
+        if mod_id not in by_id:
+            copy = dict(item)
+            copy["id"] = mod_id
+            by_id[mod_id] = copy
+            original.append(mod_id)
+
+    if not original:
+        return [], []
+
+    graph: dict[str, list[str]] = {}
+    for parent, children in dependency_graph.items():
+        parent_id = str(parent)
+        if not parent_id.isdigit():
+            continue
+        valid_children = []
+        for child in children if isinstance(children, list) else []:
+            child_id = str(child).strip()
+            if child_id.isdigit() and 5 <= len(child_id) <= 20 and child_id != parent_id:
+                if child_id not in valid_children:
+                    valid_children.append(child_id)
+        graph[parent_id] = valid_children
+
+    required = set(original)
+    def collect(parent_id: str, visited: set[str]) -> None:
+        if parent_id in visited:
+            return
+        visited.add(parent_id)
+        for child_id in graph.get(parent_id, []):
+            required.add(child_id)
+            collect(child_id, visited)
+
+    for parent_id in original:
+        collect(parent_id, set())
+
+    added_ids = [mid for mid in required if mid not in by_id]
+    for mid in added_ids:
+        item = dict(metadata.get(mid, {}))
+        item["id"] = mid
+        item["title"] = str(item.get("title") or f"Workshop_{mid}")
+        item.setdefault("dependencies", [])
+        item["update_status"] = item.get("update_status") or "MISSING"
+        by_id[mid] = item
+
+    # Preserve Lua For Barotrauma as the first entry even if a package declares
+    # it as a child. Report no guessed order: its special placement is deliberate.
+    lua_id = "2559634234"
+    ordered: list[str] = []
+    visited: set[str] = set()
+    visiting: set[str] = set()
+    cycles: list[str] = []
+
+    def visit(mod_id: str) -> None:
+        if mod_id in visited:
+            return
+        if mod_id in visiting:
+            cycles.append(mod_id)
+            return
+        visiting.add(mod_id)
+        if mod_id != lua_id:
+            for child_id in graph.get(mod_id, []):
+                if child_id in required and child_id != lua_id:
+                    visit(child_id)
+        visiting.remove(mod_id)
+        visited.add(mod_id)
+        if mod_id not in ordered:
+            ordered.append(mod_id)
+
+    if lua_id in required:
+        ordered.append(lua_id)
+        visited.add(lua_id)
+    for mod_id in original:
+        visit(mod_id)
+    for mod_id in added_ids:
+        visit(mod_id)
+
+    if cycles:
+        raise ValueError(
+            "В зависимостях обнаружен цикл: " + ", ".join(dict.fromkeys(cycles))
+        )
+    for mod_id in ordered:
+        by_id[mod_id]["dependencies"] = list(graph.get(mod_id, []))
+    ordered_mods = [by_id[mid] for mid in ordered]
+    return ordered_mods, [mid for mid in ordered if mid in set(added_ids)]
+
+
+def validate_profile_packages(mods: list[dict], local_mods_dir: Path) -> list[str]:
+    """Check IDs and local package manifests before writing the active game config."""
+    errors = []
+    if not mods:
+        # An empty profile intentionally disables regular Workshop packages.
+        return []
+    seen = set()
+    for index, mod in enumerate(mods, 1):
+        if not isinstance(mod, dict):
+            errors.append(f"Позиция {index}: некорректная запись мода.")
+            continue
+        mod_id = str(mod.get("id", "")).strip()
+        if not mod_id.isdigit() or not (5 <= len(mod_id) <= 20):
+            errors.append(f"Позиция {index}: некорректный Workshop ID «{mod_id}».")
+            continue
+        if mod_id in seen:
+            errors.append(f"Повторяющийся Workshop ID: {mod_id}.")
+            continue
+        seen.add(mod_id)
+        filelist = Path(local_mods_dir) / mod_id / "filelist.xml"
+        if not filelist.is_file():
+            errors.append(f"{mod.get('title') or mod_id}: локальный filelist.xml не найден.")
+            continue
+        try:
+            root = ET.parse(filelist).getroot()
+            if str(root.tag).split("}")[-1].casefold() != "contentpackage":
+                errors.append(f"{mod.get('title') or mod_id}: filelist.xml имеет неожиданный корневой элемент.")
+        except (ET.ParseError, OSError) as exc:
+            errors.append(f"{mod.get('title') or mod_id}: filelist.xml повреждён ({exc}).")
+    return errors
+
+
 
 
 def serialize_barotrauma_modlist(mods: list[dict], preset_name: str) -> bytes:
@@ -504,6 +760,7 @@ class ProfileStore:
             "installed_versions": {},
             "profiles": {self.default_profile: []},
             "profile_sources": {},
+            "profile_history": {},
             "parallel_downloads": 2,
         }
         self.load()
@@ -560,6 +817,30 @@ class ProfileStore:
                 if str(name) in normalized_profiles and isinstance(source, dict)
             }
 
+            raw_history = self.data.get("profile_history")
+            if not isinstance(raw_history, dict):
+                raw_history = {}
+            normalized_history = {}
+            for profile_name, entries in raw_history.items():
+                if profile_name not in normalized_profiles or not isinstance(entries, list):
+                    continue
+                clean_entries = []
+                for entry in entries[-25:]:
+                    if not isinstance(entry, dict) or not isinstance(entry.get("mods"), list):
+                        continue
+                    clean_mods = []
+                    for mod in entry["mods"]:
+                        if isinstance(mod, dict) and str(mod.get("id", "")).isdigit():
+                            clean_mods.append(dict(mod))
+                    clean_entries.append({
+                        "created_at": str(entry.get("created_at", ""))[:64],
+                        "label": str(entry.get("label", "Snapshot"))[:100],
+                        "mods": clean_mods,
+                    })
+                if clean_entries:
+                    normalized_history[str(profile_name)] = clean_entries
+            self.data["profile_history"] = normalized_history
+
             active = self.data.get("active_profile")
             if active not in normalized_profiles:
                 self.data["active_profile"] = next(iter(normalized_profiles))
@@ -571,7 +852,7 @@ class ProfileStore:
                 str(k): int(v) for k, v in versions.items()
                 if str(k).isdigit() and str(v).isdigit()
             }
-            self.data["schema_version"] = 3
+            self.data["schema_version"] = 4
             try:
                 parallel = int(self.data.get("parallel_downloads", 2))
             except (TypeError, ValueError):
@@ -597,16 +878,83 @@ class ProfileStore:
         with self._lock:
             return [dict(mod) for mod in self.data["profiles"].get(profile_name, [])]
 
-    def set_active_mods(self, mods: list[dict]):
-        with self._lock:
-            profile = self.data["active_profile"]
-            self.data["profiles"][profile] = [dict(mod) for mod in mods]
-            self.save()
+    def _snapshot_profile_locked(self, profile_name: str, label: str = "Изменение") -> bool:
+        current = self.data["profiles"].get(profile_name)
+        if not isinstance(current, list) or not current:
+            return False
+        history = self.data.setdefault("profile_history", {}).setdefault(profile_name, [])
+        history_fields = (
+            "id", "title", "dependencies", "update_status", "author_order",
+            "tier_label", "time_updated", "api_error",
+        )
+        snapshot = [
+            {key: mod[key] for key in history_fields if key in mod}
+            for mod in current if isinstance(mod, dict)
+        ]
+        if history and history[-1].get("mods") == snapshot:
+            return False
+        history.append({
+            "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "label": str(label or "Изменение")[:100],
+            "mods": snapshot,
+        })
+        self.data["profile_history"][profile_name] = history[-25:]
+        return True
 
-    def set_profile_mods(self, profile_name: str, mods: list[dict]):
+    def snapshot_profile(self, profile_name: str, label: str = "Изменение") -> bool:
         with self._lock:
             if profile_name not in self.data["profiles"]:
                 raise KeyError(f"Профиль «{profile_name}» больше не существует.")
+            changed = self._snapshot_profile_locked(profile_name, label)
+            if changed:
+                self.save()
+            return changed
+
+    def get_profile_history(self, profile_name: str) -> list[dict]:
+        with self._lock:
+            entries = self.data.setdefault("profile_history", {}).get(profile_name, [])
+            return [
+                {
+                    "created_at": entry.get("created_at", ""),
+                    "label": entry.get("label", "Snapshot"),
+                    "mods": [dict(mod) for mod in entry.get("mods", [])],
+                }
+                for entry in entries
+            ]
+
+    def restore_profile_snapshot(self, profile_name: str, index: int) -> None:
+        with self._lock:
+            entries = self.data.setdefault("profile_history", {}).get(profile_name, [])
+            if profile_name not in self.data["profiles"]:
+                raise KeyError(f"Профиль «{profile_name}» больше не существует.")
+            if not isinstance(index, int) or not (0 <= index < len(entries)):
+                raise IndexError("Снимок профиля больше не существует.")
+            current = [dict(mod) for mod in self.data["profiles"][profile_name]]
+            target = [dict(mod) for mod in entries[index].get("mods", [])]
+            if current == target:
+                return
+            self._snapshot_profile_locked(profile_name, "Перед восстановлением")
+            self.data["profiles"][profile_name] = target
+            source = self.data.setdefault("profile_sources", {}).get(profile_name, {})
+            if source.get("format") == "Barotrauma ModList":
+                source["order_mode"] = "manual"
+                source["ordered_ids"] = [str(mod.get("id", "")) for mod in target]
+            self.save()
+
+    def set_active_mods(self, mods: list[dict], snapshot: bool = False):
+        with self._lock:
+            profile = self.data["active_profile"]
+            if snapshot:
+                self._snapshot_profile_locked(profile, "Перед изменением порядка")
+            self.data["profiles"][profile] = [dict(mod) for mod in mods]
+            self.save()
+
+    def set_profile_mods(self, profile_name: str, mods: list[dict], snapshot: bool = True):
+        with self._lock:
+            if profile_name not in self.data["profiles"]:
+                raise KeyError(f"Профиль «{profile_name}» больше не существует.")
+            if snapshot:
+                self._snapshot_profile_locked(profile_name, "Перед обновлением профиля")
             self.data["profiles"][profile_name] = [dict(mod) for mod in mods]
             self.save()
 
@@ -1117,6 +1465,107 @@ class BaroModManagerCore:
                         "time_updated": 0,
                     }
         return metadata
+    def fetch_workshop_dependencies(
+        self, mod_ids: list[str], api_key: str, max_depth: int = 5,
+    ) -> tuple[dict[str, list[str]], list[str], bool]:
+        """Fetch Barotrauma-style Workshop children through IPublishedFileService/GetDetails."""
+        key = str(api_key or "").strip()
+        if not re.fullmatch(r"[A-Fa-f0-9]{32}", key):
+            raise ValueError("Steam Web API key должен состоять из 32 шестнадцатеричных символов.")
+
+        initial_ids = list(dict.fromkeys(
+            str(mid).strip() for mid in mod_ids
+            if str(mid).strip().isdigit() and 5 <= len(str(mid).strip()) <= 20
+        ))
+        if not initial_ids:
+            return {}, [], False
+        if len(initial_ids) > MODLIST_MAX_ITEMS:
+            raise ValueError(f"Нельзя проверять больше {MODLIST_MAX_ITEMS} Workshop ID за один раз.")
+
+        endpoint = "https://api.steampowered.com/IPublishedFileService/GetDetails/v1/"
+        graph: dict[str, list[str]] = {}
+        unavailable: set[str] = set()
+        seen: set[str] = set()
+        frontier = initial_ids[:]
+        truncated = False
+
+        for depth in range(max(1, min(int(max_depth), 5))):
+            batch = [mid for mid in frontier if mid not in seen]
+            if not batch:
+                break
+            next_frontier: list[str] = []
+            for start in range(0, len(batch), 50):
+                chunk = batch[start:start + 50]
+                input_payload = {
+                    "publishedfileids": chunk,
+                    "includechildren": True,
+                }
+                response = self.session.get(
+                    endpoint,
+                    params={
+                        "key": key,
+                        "input_json": json.dumps(input_payload, separators=(",", ":")),
+                    },
+                    timeout=(10, 45),
+                )
+                if response.status_code in (401, 403):
+                    raise RuntimeError("Steam отклонил API key при проверке зависимостей.")
+                if response.status_code == 429:
+                    raise RuntimeError("Steam временно ограничил запросы зависимостей. Повтори проверку позже.")
+                response.raise_for_status()
+                body = response.json()
+                api_response = body.get("response", {}) if isinstance(body, dict) else {}
+                if not isinstance(api_response, dict):
+                    raise RuntimeError("Steam вернул неожиданный формат при проверке зависимостей.")
+                items = api_response.get("publishedfiledetails")
+                if not isinstance(items, list):
+                    raise RuntimeError("Steam не вернул список Workshop details для проверки зависимостей.")
+
+                found = set()
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    parent_id = str(item.get("publishedfileid", "")).strip()
+                    if parent_id not in chunk:
+                        continue
+                    found.add(parent_id)
+                    result_code = int(item.get("result", 0) or 0)
+                    consumer_app_id = int(item.get("consumer_app_id", 0) or 0)
+                    if result_code != 1 or consumer_app_id not in (0, int(BAROTRAUMA_APP_ID)):
+                        unavailable.add(parent_id)
+                        continue
+
+                    children = item.get("children")
+                    if not isinstance(children, list):
+                        # Do not report "no dependencies" when the endpoint omitted children.
+                        unavailable.add(parent_id)
+                        continue
+
+                    child_ids: list[str] = []
+                    for child in children:
+                        raw_id = child.get("publishedfileid", "") if isinstance(child, dict) else child
+                        child_id = str(raw_id).strip()
+                        if not child_id.isdigit() or not (5 <= len(child_id) <= 20):
+                            continue
+                        if child_id == parent_id or child_id in child_ids:
+                            continue
+                        child_ids.append(child_id)
+                    graph[parent_id] = child_ids
+                    next_frontier.extend(child_id for child_id in child_ids if child_id not in seen)
+
+                unavailable.update(mid for mid in chunk if mid not in found)
+
+            seen.update(batch)
+            frontier = list(dict.fromkeys(next_frontier))
+            if len(seen) + len(frontier) > MODLIST_MAX_ITEMS:
+                raise ValueError(
+                    f"Цепочка зависимостей превышает {MODLIST_MAX_ITEMS} элементов; проверка остановлена."
+                )
+            if depth == max(1, min(int(max_depth), 5)) - 1 and frontier:
+                truncated = True
+
+        return graph, sorted(unavailable), truncated
+
     def query_workshop(
         self, search_text: str, api_key: str, sort_mode: str = "relevance",
         cursor: str = "*", per_page: int = 24, content_type: str = "items",
@@ -2190,6 +2639,15 @@ class BaroModManagerCore:
         if not self.config_path.is_file():
             raise FileNotFoundError(f"Не найден config_player.xml: {self.config_path}")
 
+        readiness_errors = validate_profile_packages(mods_list, self.local_mods_dir)
+        if readiness_errors:
+            preview = "\n".join(f"• {item}" for item in readiness_errors[:12])
+            if len(readiness_errors) > 12:
+                preview += f"\n…и ещё {len(readiness_errors) - 12}"
+            raise ValueError(
+                "Проверка профиля не пройдена; config_player.xml не изменён:\n" + preview
+            )
+
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         backup_path = self.config_path.with_suffix(self.config_path.suffix + ".bak")
         if not backup_path.exists():
@@ -2715,8 +3173,10 @@ class ModManagerGUI(tk.Tk):
         self.notebook.grid(row=3, column=0, sticky="nsew")
         self.profile_tab = tk.Frame(self.notebook, bg=BG, padx=1, pady=8)
         self.workshop_tab = tk.Frame(self.notebook, bg=BG, padx=1, pady=8)
+        self.builds_tab = tk.Frame(self.notebook, bg=BG, padx=1, pady=8)
         self.notebook.add(self.profile_tab, text="  МОИ ПРОФИЛИ  ")
         self.notebook.add(self.workshop_tab, text="  STEAM WORKSHOP  ")
+        self.notebook.add(self.builds_tab, text="  МОИ СБОРКИ  ")
 
         # Profile header: one compact strip instead of several competing cards.
         profile = self.profile_tab
@@ -2983,7 +3443,93 @@ class ModManagerGUI(tk.Tk):
         )
         self.workshop_more_btn.grid(row=2, column=0, sticky="e", pady=(8, 0))
         self.workshop_more_btn.config(state="disabled")
+
+        # Local build library: validated .bmm-pack files, not a second profile store.
+        builds = self.builds_tab
+        builds.columnconfigure(0, weight=1)
+        builds.rowconfigure(1, weight=1)
+        build_toolbar = card(builds, padx=12, pady=10)
+        build_toolbar.grid(row=0, column=0, sticky="we", pady=(0, 8))
+        label(build_toolbar, "БИБЛИОТЕКА СБОРОК", size=9, color=ACCENT, bold=True).pack(anchor="w", pady=(0, 8))
+        build_actions = tk.Frame(build_toolbar, bg=PANEL)
+        build_actions.pack(fill="x")
+        button(build_actions, "ОБНОВИТЬ СПИСОК", self.refresh_build_library,
+               color="#244b63", hover="#2c607d", track=True).pack(side="left", padx=(0, 5))
+        button(build_actions, "ИМПОРТИРОВАТЬ", self.import_selected_build,
+               color="#315947", hover="#3d7059", track=True).pack(side="left", padx=(0, 5))
+        button(build_actions, "РЕДАКТИРОВАТЬ", self.edit_selected_build,
+               color="#244b63", hover="#2c607d", track=True).pack(side="left", padx=(0, 5))
+        button(build_actions, "УДАЛИТЬ ФАЙЛ", self.delete_selected_build,
+               color="#52313a", hover="#70404c", track=True).pack(side="left", padx=(0, 5))
+        button(build_actions, "УСТАНОВИТЬ НЕДОСТАЮЩИЕ", self.install_missing_from_build,
+               color="#17785d", hover="#218e70", track=True).pack(side="left", padx=(0, 5))
+        build_actions2 = tk.Frame(build_toolbar, bg=PANEL)
+        build_actions2.pack(fill="x", pady=(7, 0))
+        button(build_actions2, "СРАВНИТЬ С ПРОФИЛЕМ", self.compare_selected_build,
+               color="#4b3b69", hover="#655087", track=True).pack(side="left", padx=(0, 5))
+        button(build_actions2, "ПРОВЕРИТЬ STEAM COLLECTION", self.compare_selected_collection,
+               color="#4b3b69", hover="#655087", track=True).pack(side="left", padx=(0, 5))
+        button(build_actions2, "ОТКРЫТЬ COLLECTION", self.open_selected_collection,
+               color="#244b63", hover="#2c607d", track=True).pack(side="left", padx=(0, 5))
+        button(build_actions2, "СРАВНИТЬ С СЕРВЕРОМ", self.compare_selected_server,
+               color="#4b3b69", hover="#655087", track=True).pack(side="left", padx=(0, 5))
+        button(build_actions2, "ИСТОРИЯ ПРОФИЛЯ", self.show_profile_history,
+               color="#244b63", hover="#2c607d", track=True).pack(side="left", padx=(0, 5))
+        build_actions3 = tk.Frame(build_toolbar, bg=PANEL)
+        build_actions3.pack(fill="x", pady=(7, 0))
+        button(build_actions3, "ПРОВЕРИТЬ ЗАВИСИМОСТИ", self.check_selected_build_dependencies,
+               color="#4b3b69", hover="#655087", track=True).pack(side="left", padx=(0, 5))
+        button(build_actions3, "ОБНОВИТЬ ИЗ ПРОФИЛЯ", self.update_selected_build_from_profile,
+               color="#315947", hover="#3d7059", track=True).pack(side="left", padx=(0, 5))
+        button(build_actions3, "ЭКСПОРТ КОПИИ", self.export_selected_build_copy,
+               color="#244b63", hover="#2c607d", track=True).pack(side="left", padx=(0, 5))
+        self.build_library_status_var = tk.StringVar(value="Локальные сборки хранятся на этом ПК.")
+        label(build_toolbar, "", size=8, color=MUTED).pack_forget()
+        tk.Label(
+            build_toolbar, textvariable=self.build_library_status_var,
+            bg=PANEL, fg=MUTED, font=("Segoe UI", 8), anchor="w",
+        ).pack(anchor="w", pady=(7, 0))
+
+        build_list_panel = card(builds, padx=12, pady=10)
+        build_list_panel.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
+        build_list_panel.columnconfigure(0, weight=1)
+        build_list_panel.rowconfigure(0, weight=1)
+        self.build_library_tree = ttk.Treeview(
+            build_list_panel,
+            columns=("name", "mods", "collection", "updated", "file"),
+            show="headings", selectmode="extended", style="Baro.Treeview",
+        )
+        for column, caption, width, anchor, stretch in (
+            ("name", "СБОРКА", 240, "w", True),
+            ("mods", "МОДЫ", 65, "center", False),
+            ("collection", "STEAM COLLECTION", 150, "center", False),
+            ("updated", "ИЗМЕНЁН", 145, "center", False),
+            ("file", "ФАЙЛ", 260, "w", True),
+        ):
+            self.build_library_tree.heading(column, text=caption)
+            self.build_library_tree.column(column, width=width, anchor=anchor, stretch=stretch)
+        self.build_library_tree.grid(row=0, column=0, sticky="nsew")
+        build_scroll = ttk.Scrollbar(
+            build_list_panel, orient="vertical", command=self.build_library_tree.yview,
+            style="Baro.Vertical.TScrollbar",
+        )
+        build_scroll.grid(row=0, column=1, sticky="ns")
+        self.build_library_tree.configure(yscrollcommand=build_scroll.set)
+        self.build_library_tree.bind("<<TreeviewSelect>>", self._on_build_library_selection)
+        self.build_library_tree.bind("<Double-Button-1>", lambda _event: self.edit_selected_build())
+        self._build_library_entries = {}
+        self.build_details_var = tk.StringVar(
+            value="Выбери сборку, чтобы увидеть описание, Workshop ID и связанные данные."
+        )
+        build_details = card(builds, padx=12, pady=8)
+        build_details.grid(row=2, column=0, sticky="we")
+        tk.Label(
+            build_details, textvariable=self.build_details_var, bg=PANEL, fg="#b7c7d7",
+            font=("Segoe UI", 8), justify="left", anchor="w", wraplength=1100,
+        ).pack(fill="x")
+
         self._update_path_summary()
+        self.refresh_build_library()
 
     def toggle_paths_panel(self):
         self._paths_expanded = not self._paths_expanded
@@ -4123,6 +4669,7 @@ class ModManagerGUI(tk.Tk):
         if messagebox.askyesno("Удаление", f"Удалить профиль «{cur}»?"):
             del self.store.data["profiles"][cur]
             self.store.data.setdefault("profile_sources", {}).pop(cur, None)
+            self.store.data.setdefault("profile_history", {}).pop(cur, None)
             self.store.data["active_profile"] = next(iter(self.store.data["profiles"]))
             self.store.save()
             self._refresh_profile_selector()
@@ -4138,6 +4685,7 @@ class ModManagerGUI(tk.Tk):
         mods = self.store.get_active_mods()
         new_idx = idx + direction
         if 0 <= new_idx < len(mods):
+            self.store.snapshot_profile(self.store.data["active_profile"], "Перед ручной перестановкой")
             mods[idx], mods[new_idx] = mods[new_idx], mods[idx]
             self.store.set_active_mods(mods)
             source = self.store.data.setdefault("profile_sources", {}).get(self.store.data["active_profile"])
@@ -4210,6 +4758,14 @@ class ModManagerGUI(tk.Tk):
         if full_delete is None:
             return
 
+        # Snapshot every profile that will actually lose this item.
+        if full_delete:
+            for profile_name, profile_mods in list(self.store.data["profiles"].items()):
+                if any(str(mod.get("id", "")) == mid for mod in profile_mods):
+                    self.store.snapshot_profile(profile_name, "Перед глобальным удалением мода")
+        else:
+            self.store.snapshot_profile(self.store.data["active_profile"], "Перед удалением мода из профиля")
+
         core = self._get_core()
         try:
             if full_delete:
@@ -4264,6 +4820,736 @@ class ModManagerGUI(tk.Tk):
         BUILD_PACKS_DIR.mkdir(parents=True, exist_ok=True)
         return BUILD_PACKS_DIR
 
+    def _selected_build_entries(self) -> list[dict]:
+        if not hasattr(self, "build_library_tree"):
+            return []
+        return [
+            self._build_library_entries[iid]
+            for iid in self.build_library_tree.selection()
+            if iid in self._build_library_entries
+        ]
+
+    def refresh_build_library(self):
+        if not hasattr(self, "build_library_tree"):
+            return
+        tree = self.build_library_tree
+        for iid in tree.get_children():
+            tree.delete(iid)
+        self._build_library_entries = {}
+        entries, invalid = list_build_packs(self._build_packs_directory())
+        for index, entry in enumerate(entries):
+            iid = f"build_{index}"
+            collection_id = entry.get("steam_collection_id", "")
+            collection_label = f"#{collection_id}" if collection_id else "—"
+            modified = datetime.fromtimestamp(entry["modified_at"]).strftime("%Y-%m-%d %H:%M")
+            tree.insert(
+                "", "end", iid=iid,
+                values=(
+                    entry["name"], entry["mod_count"], collection_label,
+                    modified, entry["path"].name,
+                ),
+            )
+            self._build_library_entries[iid] = entry
+        status = f"Сборок: {len(entries)} · Папка: {self._build_packs_directory()}"
+        if invalid:
+            status += f" · Повреждённых файлов: {len(invalid)} (не удалены)"
+        self.build_library_status_var.set(status)
+        if not entries:
+            self.build_details_var.set("Пока нет сохранённых сборок. Используй «СОХРАНИТЬ СБОРКУ» в профилях.")
+        else:
+            self.build_details_var.set("Выбери сборку, чтобы посмотреть описание и действия.")
+        if hasattr(self, "build_details_var"):
+            self._on_build_library_selection()
+
+    def _on_build_library_selection(self, _event=None):
+        entries = self._selected_build_entries()
+        if not entries:
+            return
+        if len(entries) > 1:
+            self.build_details_var.set(
+                f"Выбрано сборок: {len(entries)}. Нажми «СРАВНИТЬ С ПРОФИЛЕМ» — сравнятся первые две."
+            )
+            return
+        entry = entries[0]
+        description = entry.get("description") or "Описание не задано."
+        collection_id = entry.get("steam_collection_id", "")
+        collection = (
+            f"Steam Collection: https://steamcommunity.com/sharedfiles/filedetails/?id={collection_id}"
+            if collection_id else "Steam Collection не привязана."
+        )
+        ids = [str(mod.get("id", "")) for mod in entry.get("mods", [])]
+        preview = ", ".join(ids[:10]) + (f" … ещё {len(ids) - 10}" if len(ids) > 10 else "")
+        self.build_details_var.set(
+            f"{entry['name']} · {entry['mod_count']} модов\n{description}\n{collection}\nWorkshop ID: {preview}"
+        )
+
+    @staticmethod
+    def _atomic_write_build_pack(path: Path, payload: bytes):
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(path.name + ".tmp")
+        try:
+            temporary.write_bytes(payload)
+            os.replace(temporary, path)
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def edit_selected_build(self):
+        if self._profile_job_running:
+            return
+        selected = self._selected_build_entries()
+        if len(selected) != 1:
+            messagebox.showinfo("Библиотека сборок", "Выбери одну сборку для редактирования.", parent=self)
+            return
+        entry = selected[0]
+        path = entry["path"]
+        try:
+            pack = read_build_pack(path)
+        except Exception as exc:
+            messagebox.showerror("Сборка", str(exc), parent=self)
+            self.refresh_build_library()
+            return
+
+        name = simpledialog.askstring(
+            "Редактировать сборку", "Название (до 40 символов):",
+            initialvalue=pack["name"], parent=self,
+        )
+        if name is None:
+            return
+        name = name.strip()
+        if not name or len(name) > 40:
+            messagebox.showwarning("Сборка", "Название должно содержать от 1 до 40 символов.", parent=self)
+            return
+        description = simpledialog.askstring(
+            "Описание сборки", "Описание (до 2000 символов):",
+            initialvalue=pack["description"], parent=self,
+        )
+        if description is None:
+            return
+        collection = simpledialog.askstring(
+            "Steam Collection", "ID или URL коллекции (оставь пустым, чтобы отвязать):",
+            initialvalue=pack.get("steam_collection_id", ""), parent=self,
+        )
+        if collection is None:
+            return
+        try:
+            collection_id = self._get_core().extract_steam_id(collection.strip()) if collection.strip() else ""
+            payload = serialize_build_pack(
+                pack["mods"], name, description, pack.get("source_profile", ""),
+                steam_collection_id=collection_id,
+            )
+            self._atomic_write_build_pack(path, payload)
+            self.refresh_build_library()
+            messagebox.showinfo("Сборка", "Метаданные сборки обновлены.", parent=self)
+        except Exception as exc:
+            messagebox.showerror("Редактирование сборки", str(exc), parent=self)
+
+    def update_selected_build_from_profile(self):
+        if self._profile_job_running:
+            return
+        selected = self._selected_build_entries()
+        if len(selected) != 1:
+            messagebox.showinfo("Библиотека сборок", "Выбери одну сборку.", parent=self)
+            return
+        active_profile = str(self.store.data.get("active_profile", ""))
+        mods = self.store.get_profile_mods(active_profile)
+        if not mods:
+            messagebox.showwarning("Сборка", "Активный профиль пуст — обновлять состав сборки нечем.", parent=self)
+            return
+        entry = selected[0]
+        path = Path(entry["path"])
+        if not messagebox.askyesno(
+            "Обновить сборку из профиля",
+            f"Заменить список модов в «{entry['name']}» содержимым активного профиля «{active_profile}»?\n"
+            "Название, описание и привязанная Steam Collection сохранятся.",
+            parent=self,
+        ):
+            return
+        try:
+            current = read_build_pack(path)
+            payload = serialize_build_pack(
+                mods,
+                current["name"],
+                current["description"],
+                source_profile=active_profile,
+                steam_collection_id=current.get("steam_collection_id", ""),
+            )
+            self._atomic_write_build_pack(path, payload)
+            self.refresh_build_library()
+            messagebox.showinfo("Сборка", "Содержимое сборки обновлено из активного профиля.", parent=self)
+        except Exception as exc:
+            messagebox.showerror("Обновление сборки", str(exc), parent=self)
+
+    def export_selected_build_copy(self):
+        if self._profile_job_running:
+            return
+        selected = self._selected_build_entries()
+        if len(selected) != 1:
+            messagebox.showinfo("Экспорт сборки", "Выбери одну сборку для экспорта.", parent=self)
+            return
+        source = Path(selected[0]["path"])
+        try:
+            payload = source.read_bytes()
+            read_build_pack(source)  # Re-validate before exporting.
+            target_text = filedialog.asksaveasfilename(
+                parent=self,
+                title="Экспортировать копию сборки",
+                initialfile=source.name,
+                defaultextension=".bmm-pack",
+                filetypes=(("Barotrauma Mod Manager pack", "*.bmm-pack"), ("Все файлы", "*.*")),
+            )
+            if not target_text:
+                return
+            target = Path(target_text)
+            if target.resolve() == source.resolve():
+                messagebox.showinfo("Экспорт сборки", "Выбрана исходная сборка из библиотеки.", parent=self)
+                return
+            if target.suffix.casefold() != ".bmm-pack":
+                target = target.with_suffix(".bmm-pack")
+            self._atomic_write_build_pack(target, payload)
+            messagebox.showinfo("Экспорт сборки", f"Копия сохранена:\n{target}", parent=self)
+        except Exception as exc:
+            messagebox.showerror("Экспорт сборки", str(exc), parent=self)
+
+    def delete_selected_build(self):
+        if self._profile_job_running:
+            return
+        selected = self._selected_build_entries()
+        if len(selected) != 1:
+            messagebox.showinfo("Библиотека сборок", "Выбери одну сборку для удаления.", parent=self)
+            return
+        path = Path(selected[0]["path"])
+        directory = self._build_packs_directory().resolve()
+        try:
+            if path.resolve().parent != directory or path.suffix.casefold() != ".bmm-pack":
+                raise ValueError("Файл сборки находится вне локальной библиотеки.")
+            if not messagebox.askyesno(
+                "Удалить сборку",
+                f"Удалить файл «{path.name}»?\nПрофили и локальные файлы модов не затрагиваются.",
+                parent=self,
+            ):
+                return
+            path.unlink()
+            self.refresh_build_library()
+            self.log(f"[Build] Удалён файл сборки {path.name}; профили и моды не менялись.")
+        except Exception as exc:
+            messagebox.showerror("Удаление сборки", str(exc), parent=self)
+
+    def import_selected_build(self):
+        selected = self._selected_build_entries()
+        if len(selected) != 1:
+            messagebox.showinfo("Библиотека сборок", "Выбери одну сборку для импорта.", parent=self)
+            return
+        path = Path(selected[0]["path"])
+        try:
+            pack = read_build_pack(path)
+        except Exception as exc:
+            messagebox.showerror("Импорт сборки", str(exc), parent=self)
+            return
+        self._begin_import_build_pack(path, pack)
+
+    def compare_selected_build(self):
+        if self._profile_job_running:
+            return
+        selected = self._selected_build_entries()
+        if len(selected) == 2:
+            left_name, left_mods = selected[0]["name"], selected[0]["mods"]
+            right_name, right_mods = selected[1]["name"], selected[1]["mods"]
+        elif len(selected) == 1:
+            left_name, left_mods = selected[0]["name"], selected[0]["mods"]
+            right_name = f"Профиль: {self.store.data['active_profile']}"
+            right_mods = self.store.get_active_mods()
+        else:
+            messagebox.showinfo(
+                "Сравнение сборок",
+                "Выбери одну сборку для сравнения с активным профилем или две сборки для сравнения между собой.",
+                parent=self,
+            )
+            return
+        self._show_mod_comparison(left_name, left_mods, right_name, right_mods)
+
+    def _show_mod_comparison(self, left_name: str, left_mods: list[dict], right_name: str, right_mods: list[dict]):
+        comparison = compare_mod_lists(left_mods, right_mods)
+        dialog = tk.Toplevel(self)
+        dialog.title("Сравнение сборок")
+        dialog.geometry("760x540")
+        dialog.configure(bg=BG)
+        tk.Label(
+            dialog,
+            text=f"{left_name}  ↔  {right_name}",
+            bg=BG, fg=TEXT, font=("Segoe UI", 11, "bold"),
+            wraplength=710, justify="left",
+        ).pack(anchor="w", padx=16, pady=(16, 8))
+        order_text = "Порядок общих модов совпадает." if comparison["same_order"] else (
+            "Порядок общих модов отличается — проверь рекомендации авторов."
+        )
+        tk.Label(
+            dialog,
+            text=(
+                f"Всего: {comparison['left_count']} ↔ {comparison['right_count']} · "
+                f"Совпадает: {comparison['common_count']}\n{order_text}"
+            ),
+            bg=BG, fg="#9eb2c6", font=("Segoe UI", 9), justify="left",
+        ).pack(anchor="w", padx=16, pady=(0, 10))
+        body = tk.Frame(dialog, bg=BG)
+        body.pack(fill="both", expand=True, padx=16, pady=(0, 12))
+        body.columnconfigure(0, weight=1)
+        body.columnconfigure(1, weight=1)
+        body.rowconfigure(1, weight=1)
+        tk.Label(body, text=f"Только в {left_name} ({len(comparison['only_left'])})",
+                 bg=BG, fg="#f0c078", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w")
+        tk.Label(body, text=f"Только в {right_name} ({len(comparison['only_right'])})",
+                 bg=BG, fg="#7bdcb2", font=("Segoe UI", 9, "bold")).grid(row=0, column=1, sticky="w")
+        left_box = scrolledtext.ScrolledText(body, bg="#0b1118", fg=TEXT, font=("Consolas", 9), relief="flat")
+        right_box = scrolledtext.ScrolledText(body, bg="#0b1118", fg=TEXT, font=("Consolas", 9), relief="flat")
+        left_box.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(6, 0))
+        right_box.grid(row=1, column=1, sticky="nsew", padx=(6, 0), pady=(6, 0))
+        left_titles = {str(item.get("id")): str(item.get("title", item.get("id"))) for item in left_mods}
+        right_titles = {str(item.get("id")): str(item.get("title", item.get("id"))) for item in right_mods}
+        for mod_id in comparison["only_left"]:
+            left_box.insert(tk.END, f"{left_titles.get(mod_id, mod_id)}\n{mod_id}\n\n")
+        for mod_id in comparison["only_right"]:
+            right_box.insert(tk.END, f"{right_titles.get(mod_id, mod_id)}\n{mod_id}\n\n")
+        left_box.config(state="disabled")
+        right_box.config(state="disabled")
+        tk.Button(dialog, text="ЗАКРЫТЬ", command=dialog.destroy, bg=PANEL_ALT, fg=TEXT,
+                  relief="flat", padx=16, pady=7).pack(anchor="e", padx=16, pady=(0, 14))
+
+    def open_selected_collection(self):
+        selected = self._selected_build_entries()
+        if len(selected) != 1 or not selected[0].get("steam_collection_id"):
+            messagebox.showinfo("Steam Collection", "У выбранной сборки не привязана Steam Collection.", parent=self)
+            return
+        collection_id = selected[0]["steam_collection_id"]
+        webbrowser.open(f"https://steamcommunity.com/sharedfiles/filedetails/?id={collection_id}")
+
+    def compare_selected_collection(self):
+        selected = self._selected_build_entries()
+        if len(selected) != 1:
+            messagebox.showinfo("Steam Collection", "Выбери одну сборку.", parent=self)
+            return
+        entry = selected[0]
+        collection_id = str(entry.get("steam_collection_id", ""))
+        if not collection_id:
+            messagebox.showinfo("Steam Collection", "Сначала привяжи коллекцию через «Редактировать».", parent=self)
+            return
+        if self._profile_job_running:
+            return
+        core = self._get_core()
+        self._set_profile_job(True)
+
+        def worker():
+            error = None
+            result = None
+            try:
+                collection_ids = core.fetch_collection_items(collection_id)
+                result = compare_mod_lists(entry["mods"], collection_ids)
+            except Exception as exc:
+                error = str(exc)
+            if not self._closing:
+                def finish():
+                    self._set_profile_job(False)
+                    if error:
+                        messagebox.showerror("Steam Collection", error, parent=self)
+                    else:
+                        self._show_mod_comparison(
+                            entry["name"], entry["mods"],
+                            f"Steam Collection #{collection_id}",
+                            [{"id": mid, "title": mid} for mid in collection_ids],
+                        )
+                        message = (
+                            f"В файле сборки: {result['left_count']}\n"
+                            f"В Steam Collection: {result['right_count']}\n"
+                            f"Общих модов: {result['common_count']}\n"
+                            f"Только в сборке: {len(result['only_left'])}\n"
+                            f"Только в коллекции: {len(result['only_right'])}\n\n"
+                            + ("Порядок общих модов совпадает." if result["same_order"] else
+                               "Порядок отличается или в коллекции изменён состав.")
+                        )
+                        self.log(f"[Build] Steam Collection #{collection_id}: {message.replace(chr(10), ' · ')}")
+                self.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def check_selected_build_dependencies(self):
+        """Inspect Workshop child items and optionally add missing required items."""
+        if self._profile_job_running:
+            return
+        selected = self._selected_build_entries()
+        if len(selected) > 1:
+            messagebox.showinfo(
+                "Проверка зависимостей",
+                "Выбери одну сборку или сними выделение для проверки активного профиля.",
+                parent=self,
+            )
+            return
+
+        target_kind = "build" if selected else "profile"
+        if selected:
+            entry = selected[0]
+            try:
+                pack = read_build_pack(Path(entry["path"]))
+            except Exception as exc:
+                messagebox.showerror("Проверка зависимостей", str(exc), parent=self)
+                return
+            target_name = pack["name"]
+            mods = [dict(mod) for mod in pack["mods"]]
+            target_path = Path(entry["path"])
+        else:
+            target_name = str(self.store.data.get("active_profile", ""))
+            mods = self.store.get_profile_mods(target_name)
+            target_path = None
+
+        if not mods:
+            messagebox.showinfo("Проверка зависимостей", "Список модов пуст.", parent=self)
+            return
+        api_key = str(self._steam_api_key or "").strip()
+        if not api_key:
+            messagebox.showinfo(
+                "Steam API Key",
+                "Для проверки обязательных Workshop dependencies нужен личный Steam Web API key.",
+                parent=self,
+            )
+            self.configure_steam_api_key()
+            return
+
+        mod_ids = [str(item["id"]) for item in mods]
+        core = self._get_core()
+        self._set_profile_job(True)
+
+        def worker():
+            error = None
+            graph: dict[str, list[str]] = {}
+            unavailable: list[str] = []
+            truncated = False
+            merged_mods: list[dict] = []
+            added_ids: list[str] = []
+            metadata_error = ""
+            try:
+                graph, unavailable, truncated = core.fetch_workshop_dependencies(
+                    mod_ids, api_key, max_depth=5,
+                )
+                present = set(mod_ids)
+                missing_required = sorted({
+                    child_id
+                    for child_ids in graph.values()
+                    for child_id in child_ids
+                    if child_id not in present
+                })
+                metadata = {}
+                if missing_required:
+                    try:
+                        metadata = core.fetch_mods_metadata(missing_required)
+                    except Exception as exc:
+                        metadata_error = str(exc)
+
+                merged_mods, added_ids = merge_required_workshop_dependencies(
+                    mods, graph, metadata,
+                )
+            except Exception as exc:
+                error = str(exc)
+
+            if self._closing:
+                return
+
+            def finish():
+                self._set_profile_job(False)
+                if error:
+                    messagebox.showerror("Проверка зависимостей", error, parent=self)
+                    return
+
+                edge_count = sum(len(children) for children in graph.values())
+                status_lines = [
+                    f"Проверено элементов: {len(graph)}",
+                    f"Связей Workshop children: {edge_count}",
+                    f"Новых обязательных ID: {len(added_ids)}",
+                ]
+                if unavailable:
+                    status_lines.append(
+                        f"Не удалось получить сведения: {len(unavailable)}"
+                    )
+                if truncated:
+                    status_lines.append("Глубина проверки достигла лимита 5; цепочка может быть неполной.")
+                if metadata_error:
+                    status_lines.append("Не удалось получить названия некоторых новых ID; в списке останутся ID.")
+
+                if not edge_count and not added_ids and (unavailable or truncated):
+                    messagebox.showwarning(
+                        "Проверка неполная",
+                        "\n".join(status_lines)
+                        + "\n\nSteam не вернул полные данные о зависимостях. Список модов не изменён.",
+                        parent=self,
+                    )
+                    return
+
+                if not edge_count and not unavailable and not truncated:
+                    messagebox.showinfo(
+                        "Проверка зависимостей",
+                        "Steam не сообщил обязательных дочерних Workshop items для выбранных модов.",
+                        parent=self,
+                    )
+                    return
+
+                known_relationships_changed = any(
+                    str(item.get("id", "")) in graph
+                    and list(item.get("dependencies", [])) != list(graph[str(item.get("id", ""))])
+                    for item in merged_mods
+                )
+                original_order = [str(item.get("id", "")) for item in mods]
+                merged_order = [str(item.get("id", "")) for item in merged_mods]
+                order_changed = original_order != merged_order
+                if not added_ids and not known_relationships_changed and not order_changed:
+                    if unavailable or truncated:
+                        messagebox.showwarning(
+                            "Проверка неполная",
+                            "\n".join(status_lines)
+                            + "\n\nНовых элементов по полученным данным не найдено, но часть зависимостей осталась непроверенной.",
+                            parent=self,
+                        )
+                    else:
+                        messagebox.showinfo(
+                            "Проверка зависимостей",
+                            "\n".join(status_lines)
+                            + "\n\nНовых обязательных элементов нет. Состав и порядок не изменены.",
+                            parent=self,
+                        )
+                    return
+
+                added_preview = []
+                for mod_id in added_ids[:15]:
+                    title = next(
+                        (item.get("title", mod_id) for item in merged_mods if str(item.get("id")) == mod_id),
+                        mod_id,
+                    )
+                    added_preview.append(f"• {title} ({mod_id})")
+                if len(added_ids) > 15:
+                    added_preview.append(f"…и ещё {len(added_ids) - 15}")
+
+                action_text = (
+                    "Добавить новые элементы и поставить все обнаруженные зависимости перед родительскими модами?"
+                    if added_ids else
+                    "Обновить метаданные зависимостей и порядок существующих модов?"
+                )
+                summary = "\n".join(status_lines)
+                if added_preview:
+                    summary += "\n\n" + "\n".join(added_preview)
+                if unavailable or truncated:
+                    summary += "\n\nПроверка частичная. Недоступные элементы не будут считаться проверенными."
+                summary += "\n\n" + action_text
+
+                if not messagebox.askyesno(
+                    "Найденные зависимости",
+                    summary,
+                    parent=self,
+                ):
+                    return
+
+                try:
+                    if target_kind == "build":
+                        current_pack = read_build_pack(target_path)
+                        payload = serialize_build_pack(
+                            merged_mods,
+                            current_pack["name"],
+                            current_pack["description"],
+                            source_profile=current_pack["source_profile"],
+                            steam_collection_id=current_pack.get("steam_collection_id", ""),
+                        )
+                        self._atomic_write_build_pack(target_path, payload)
+                        self.refresh_build_library()
+                    else:
+                        self.store.snapshot_profile(
+                            target_name, "Перед обновлением Workshop dependencies",
+                        )
+                        self.store.set_profile_mods(target_name, merged_mods, snapshot=False)
+                        source = self.store.get_profile_source(target_name)
+                        if source.get("format") == "Barotrauma ModList":
+                            source["order_mode"] = "manual"
+                            source["ordered_ids"] = [
+                                str(item.get("id", "")) for item in merged_mods
+                            ]
+                            self.store.set_profile_source(target_name, source)
+                        self.store.save()
+                        if self.store.data.get("active_profile") == target_name:
+                            self._refresh_mod_listbox()
+                            self._update_profile_order_indicator()
+                            self._refresh_workshop_card_states()
+
+                    missing_count = sum(
+                        1 for item in merged_mods
+                        if item.get("update_status") == "MISSING"
+                        or not find_filelist_root(core.local_mods_dir / str(item.get("id", "")))
+                    )
+                    self.log(
+                        f"[Dependencies] Проверка «{target_name}»: новых ID {len(added_ids)}, "
+                        f"недоступных результатов {len(unavailable)}, глубина ограничена: {truncated}."
+                    )
+                    messagebox.showinfo(
+                        "Зависимости сохранены",
+                        f"Новых обязательных ID добавлено: {len(added_ids)}\n"
+                        f"Модов в списке: {len(merged_mods)}\n"
+                        f"Файлов модов отсутствует локально: {missing_count}\n\n"
+                        "Нажми «ПРОВЕРИТЬ» для загрузки отсутствующих модов либо используй "
+                        "«УСТАНОВИТЬ НЕДОСТАЮЩИЕ» в библиотеке сборок.",
+                        parent=self,
+                    )
+                except Exception as exc:
+                    messagebox.showerror("Сохранение зависимостей", str(exc), parent=self)
+
+            self.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def install_missing_from_build(self):
+        selected = self._selected_build_entries()
+        if len(selected) != 1:
+            messagebox.showinfo("Установка модов", "Выбери одну сборку.", parent=self)
+            return
+        entry = selected[0]
+        core = self._get_core()
+        if not core.game_dir.is_dir():
+            messagebox.showwarning("Папка игры", "Сначала укажи существующую папку Barotrauma.", parent=self)
+            return
+        missing = [
+            str(mod["id"]) for mod in entry["mods"]
+            if not find_filelist_root(core.local_mods_dir / str(mod["id"]))
+            and not core._find_source(str(mod["id"]))
+        ]
+        if not missing:
+            messagebox.showinfo("Установка модов", "Все моды сборки уже доступны локально.", parent=self)
+            return
+        if not messagebox.askyesno(
+            "Установка модов",
+            f"Нужно загрузить {len(missing)} модов.\nИспользуется Steam CDN, затем SteamCMD с повторными попытками. Продолжить?",
+            parent=self,
+        ):
+            return
+        if self._profile_job_running:
+            return
+        self._set_profile_job(True)
+
+        def worker():
+            error = None
+            failed = {}
+            try:
+                metadata = core.fetch_mods_metadata(missing)
+            except Exception as exc:
+                self.log(f"[Build] Метаданные Steam недоступны ({exc}); пробую SteamCMD по Workshop ID.")
+                metadata = {}
+            try:
+                failed = core.acquire_mods(missing, metadata=metadata)
+            except Exception as exc:
+                error = str(exc)
+            if not self._closing:
+                def finish():
+                    self._set_profile_job(False)
+                    if error:
+                        messagebox.showerror("Установка модов", error, parent=self)
+                    else:
+                        installed = len(missing) - len(failed)
+                        self._refresh_mod_listbox()
+                        self._refresh_workshop_card_states()
+                        messagebox.showinfo(
+                            "Установка модов",
+                            f"Успешно: {installed} из {len(missing)}\nНе удалось: {len(failed)}",
+                            parent=self,
+                        )
+                        self._report_failed(failed, metadata)
+                self.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def compare_selected_server(self):
+        if self._profile_job_running:
+            return
+        selected = self._selected_build_entries()
+        if len(selected) > 1:
+            messagebox.showinfo("Сервер", "Для сравнения с сервером выбери только одну сборку.", parent=self)
+            return
+        if selected:
+            left_name, left_mods = selected[0]["name"], selected[0]["mods"]
+        else:
+            left_name = f"Профиль: {self.store.data['active_profile']}"
+            left_mods = self.store.get_active_mods()
+        server_text = simpledialog.askstring(
+            "Сравнение с сервером",
+            "Вставь только Workshop Mod IDs из настроек сервера (через запятую или пробел).\n"
+            "Не вставляй порт или другие параметры сервера.",
+            parent=self,
+        )
+        if server_text is None:
+            return
+        try:
+            server_ids = parse_server_workshop_ids(server_text)
+        except ValueError as exc:
+            messagebox.showwarning("Список сервера", str(exc), parent=self)
+            return
+        self._show_mod_comparison(
+            left_name, left_mods, "Моды сервера", [{"id": mid, "title": mid} for mid in server_ids],
+        )
+
+    def show_profile_history(self):
+        if self._profile_job_running:
+            return
+        profile_name = str(self.store.data.get("active_profile", ""))
+        entries = self.store.get_profile_history(profile_name)
+        dialog = tk.Toplevel(self)
+        dialog.title(f"История профиля — {profile_name}")
+        dialog.geometry("680x420")
+        dialog.configure(bg=BG)
+        tk.Label(
+            dialog, text=f"История: {profile_name} · снимков: {len(entries)}",
+            bg=BG, fg=TEXT, font=("Segoe UI", 10, "bold"),
+        ).pack(anchor="w", padx=14, pady=(14, 8))
+        table = ttk.Treeview(dialog, columns=("date", "label", "count"), show="headings", selectmode="browse")
+        for column, heading, width in (
+            ("date", "ДАТА", 190), ("label", "ИЗМЕНЕНИЕ", 320), ("count", "МОДЫ", 70),
+        ):
+            table.heading(column, text=heading)
+            table.column(column, width=width, anchor="w" if column == "label" else "center")
+        table.pack(fill="both", expand=True, padx=14, pady=(0, 10))
+        for index, item in enumerate(reversed(entries)):
+            table.insert(
+                "", "end", iid=str(index),
+                values=(item["created_at"], item["label"], len(item["mods"])),
+            )
+        def restore():
+            selection = table.selection()
+            if not selection:
+                return
+            history_index = len(entries) - 1 - int(selection[0])
+            if not messagebox.askyesno(
+                "Восстановить снимок",
+                "Текущий профиль будет сохранён в истории, затем выбранный снимок станет активным. Продолжить?",
+                parent=dialog,
+            ):
+                return
+            try:
+                self.store.restore_profile_snapshot(profile_name, history_index)
+                if profile_name == self.store.data.get("active_profile"):
+                    self._refresh_mod_listbox()
+                    self._update_profile_order_indicator()
+                messagebox.showinfo(
+                    "История профиля",
+                    "Снимок восстановлен. Нажми «ПРИМЕНИТЬ В ИГРУ», когда будешь готов применить этот порядок.",
+                    parent=dialog,
+                )
+                dialog.destroy()
+            except Exception as exc:
+                messagebox.showerror("История профиля", str(exc), parent=dialog)
+        footer = tk.Frame(dialog, bg=BG)
+        footer.pack(fill="x", padx=14, pady=(0, 14))
+        tk.Button(footer, text="ВОССТАНОВИТЬ ВЫБРАННОЕ", command=restore,
+                  bg="#315947", fg="white", relief="flat", padx=14, pady=7).pack(side="left")
+        tk.Button(footer, text="ЗАКРЫТЬ", command=dialog.destroy,
+                  bg=PANEL_ALT, fg=TEXT, relief="flat", padx=14, pady=7).pack(side="right")
+
+    def _build_packs_directory(self) -> Path:
+        BUILD_PACKS_DIR.mkdir(parents=True, exist_ok=True)
+        return BUILD_PACKS_DIR
+
     def export_build_pack(self):
         """Save the active profile as one portable .bmm-pack file."""
         if self._profile_job_running:
@@ -4299,6 +5585,22 @@ class ModManagerGUI(tk.Tk):
             )
             return
 
+        collection_text = simpledialog.askstring(
+            "Steam Collection",
+            "Steam Collection ID или ссылка (необязательно):",
+            initialvalue="",
+            parent=self,
+        )
+        if collection_text is None:
+            return
+        collection_id = ""
+        if collection_text.strip():
+            try:
+                collection_id = self._get_core().extract_steam_id(collection_text.strip())
+            except ValueError as exc:
+                messagebox.showwarning("Steam Collection", str(exc), parent=self)
+                return
+
         safe_name = re.sub(r'[\\/:*?"<>|]+', "_", build_name).strip(" ._") or "Barotrauma_Build"
         selected_path = filedialog.asksaveasfilename(
             parent=self,
@@ -4314,6 +5616,7 @@ class ModManagerGUI(tk.Tk):
         try:
             payload = serialize_build_pack(
                 mods, build_name, description=description, source_profile=profile_name,
+                steam_collection_id=collection_id,
             )
             output = Path(selected_path)
             if output.suffix.casefold() != ".bmm-pack":
@@ -4322,6 +5625,15 @@ class ModManagerGUI(tk.Tk):
             temp = output.with_name(output.name + ".tmp")
             temp.write_bytes(payload)
             os.replace(temp, output)
+            library_dir = self._build_packs_directory().resolve()
+            if output.resolve().parent != library_dir:
+                library_copy = library_dir / output.name
+                suffix = 2
+                while library_copy.exists() and library_copy.read_bytes() != payload:
+                    library_copy = library_dir / f"{output.stem} ({suffix}){output.suffix}"
+                    suffix += 1
+                if not library_copy.exists():
+                    self._atomic_write_build_pack(library_copy, payload)
             messagebox.showinfo(
                 self._tr("Сборка сохранена"),
                 f"{self._tr('Сборка сохранена')}: {build_name}\n"
@@ -4330,6 +5642,7 @@ class ModManagerGUI(tk.Tk):
                 parent=self,
             )
             self.log(f"[Build] Экспортирована сборка «{build_name}»: {len(mods)} модов.")
+            self.refresh_build_library()
         except Exception as exc:
             messagebox.showerror("Экспорт сборки", str(exc), parent=self)
 
@@ -4352,6 +5665,24 @@ class ModManagerGUI(tk.Tk):
             messagebox.showerror("Импорт сборки", str(exc), parent=self)
             return
 
+        try:
+            library_dir = self._build_packs_directory().resolve()
+            if source_path.resolve().parent != library_dir:
+                source_bytes = source_path.read_bytes()
+                candidate = library_dir / source_path.name
+                suffix = 2
+                while candidate.exists() and candidate.read_bytes() != source_bytes:
+                    candidate = library_dir / f"{source_path.stem} ({suffix}){source_path.suffix}"
+                    suffix += 1
+                if not candidate.exists():
+                    self._atomic_write_build_pack(candidate, source_bytes)
+                self.refresh_build_library()
+        except OSError as exc:
+            self.log(f"[Build] Не удалось добавить исходный файл в библиотеку: {exc}")
+
+        self._begin_import_build_pack(source_path, pack)
+
+    def _begin_import_build_pack(self, source_path: Path, pack: dict):
         base_name = pack["name"][:40].strip() or "Imported Build"
         target_name = base_name
         suffix = 2
@@ -4368,24 +5699,28 @@ class ModManagerGUI(tk.Tk):
             f"{self._tr('Будет создан отдельный профиль: ')}{target_name}\n"
             f"{self._tr('Существующие профили и файлы модов не изменятся. Продолжить?')}"
         )
-        confirm = messagebox.askyesno(
-            self._tr("Импорт сборки"), confirm_text, parent=self,
-        )
-        if not confirm:
+        if not messagebox.askyesno(self._tr("Импорт сборки"), confirm_text, parent=self):
             return
-
+        download_missing = messagebox.askyesno(
+            self._tr("Установить моды"),
+            self._tr("Скачать отсутствующие моды сразу после импорта?"),
+            parent=self,
+        )
         core = self._get_core()
         self._set_profile_job(True)
         threading.Thread(
             target=self._worker_import_build_pack,
-            args=(core, pack, source_path.name, target_name),
+            args=(core, pack, source_path.name, target_name, download_missing),
             daemon=True,
         ).start()
 
-    def _worker_import_build_pack(self, core, pack, source_file: str, profile_name: str):
+    def _worker_import_build_pack(
+        self, core, pack, source_file: str, profile_name: str, download_missing: bool = False,
+    ):
         error = None
         missing_count = 0
         imported_count = 0
+        failed = {}
         try:
             parsed_mods = pack["mods"]
             ids = [str(item["id"]) for item in parsed_mods]
@@ -4399,13 +5734,16 @@ class ModManagerGUI(tk.Tk):
                 )
 
             imported = []
+            missing_ids = []
             for index, parsed in enumerate(parsed_mods):
                 mid = str(parsed["id"])
                 merged = dict(remote_meta.get(mid, {}))
                 # Pack titles and order are authoritative; online metadata fills in extra fields only.
                 merged["id"] = mid
                 merged["title"] = str(parsed.get("title") or merged.get("title") or f"Workshop_{mid}")
-                merged.setdefault("dependencies", [])
+                merged["dependencies"] = list(
+                    parsed.get("dependencies", merged.get("dependencies", [])) or []
+                )
                 merged["author_order"] = index
                 try:
                     installed = bool(
@@ -4418,7 +5756,29 @@ class ModManagerGUI(tk.Tk):
                 else:
                     merged["update_status"] = "MISSING"
                     missing_count += 1
+                    missing_ids.append(mid)
                 imported.append(merged)
+
+            if download_missing and missing_ids:
+                self.log(f"[Build] Запускаю загрузку {len(missing_ids)} отсутствующих модов...")
+                try:
+                    failed = core.acquire_mods(
+                        missing_ids,
+                        metadata={mid: remote_meta.get(mid, {}) for mid in missing_ids},
+                    )
+                except Exception as download_error:
+                    failed = {mid: str(download_error) for mid in missing_ids}
+                    self.log(f"[Build] Загрузка завершилась ошибкой; профиль будет создан с отсутствующими модами: {download_error}")
+                for item in imported:
+                    mid = str(item["id"])
+                    if mid not in missing_ids:
+                        continue
+                    if mid not in failed and find_filelist_root(core.local_mods_dir / mid):
+                        item["update_status"] = "OK"
+                        missing_count -= 1
+                        self.store.mark_mod_updated(mid, int(item.get("time_updated", 0) or 0))
+                    else:
+                        item["update_status"] = "MISSING"
 
             source = {
                 "format": "Barotrauma ModList",
@@ -4430,6 +5790,7 @@ class ModManagerGUI(tk.Tk):
                 "pack_format": BUILD_PACK_FORMAT_VERSION,
                 "description": pack["description"],
                 "source_profile": pack["source_profile"],
+                "steam_collection_id": pack.get("steam_collection_id", ""),
                 "pack_created_at": pack["created_at"],
             }
             self.store.create_profile(profile_name, imported, source=source, activate=True)
@@ -4438,6 +5799,8 @@ class ModManagerGUI(tk.Tk):
                 f"[Build] Импортирована сборка «{pack['name']}»: {imported_count} модов; "
                 f"отсутствуют локально: {missing_count}. Авторский порядок сохранён."
             )
+            if failed:
+                self._report_failed(failed, {str(item["id"]): item for item in imported})
         except Exception as exc:
             error = str(exc)
             self.log(f"[ОШИБКА Build] {error}")
@@ -4448,6 +5811,7 @@ class ModManagerGUI(tk.Tk):
                 self._refresh_mod_listbox()
                 self._refresh_workshop_card_states()
                 self._update_profile_order_indicator()
+                self.refresh_build_library()
                 self._set_profile_job(False)
                 if error:
                     messagebox.showerror("Импорт сборки", error, parent=self)
@@ -4455,7 +5819,8 @@ class ModManagerGUI(tk.Tk):
                     import_summary = (
                         f"{self._tr('Создан профиль: ')}{profile_name}\n"
                         f"{self._tr('Модов в сборке: ')}{imported_count}\n"
-                        f"{self._tr('Файлов модов пока нет локально: ')}{missing_count}\n\n"
+                        f"{self._tr('Файлов модов пока нет локально: ')}{missing_count}\n"
+                        f"{self._tr('Не удалось загрузить: ')}{len(failed)}\n\n"
                         f"{self._tr('Список и порядок сохранены. Нажми «Проверить», чтобы загрузить отсутствующие моды.')}"
                     )
                     messagebox.showinfo(
@@ -4876,11 +6241,42 @@ class ModManagerGUI(tk.Tk):
             return
         try:
             core = self._get_core()
-            mods = self.store.get_active_mods()
+            mods = self.store.get_profile_mods(self.store.data["active_profile"])
+            readiness_errors = validate_profile_packages(mods, core.local_mods_dir)
+            if readiness_errors:
+                preview = "\n".join(f"• {item}" for item in readiness_errors[:12])
+                if len(readiness_errors) > 12:
+                    preview += f"\n…и ещё {len(readiness_errors) - 12}"
+                messagebox.showwarning(
+                    "Проверка сборки не пройдена",
+                    "Профиль не применён: сначала исправь проблемы с локальными файлами.\n\n"
+                    + preview + "\n\nЗагрузи недостающие моды через Workshop и повтори проверку.",
+                    parent=self,
+                )
+                return
+
+            conflicts = core.detect_conflicts(mods)
+            if conflicts:
+                preview = "\n".join(
+                    f"• {identifier}: " + ", ".join(title for title, _mid in owners[:3])
+                    for identifier, owners in list(conflicts.items())[:8]
+                )
+                if len(conflicts) > 8:
+                    preview += f"\n…и ещё {len(conflicts) - 8} конфликтов"
+                proceed = messagebox.askyesno(
+                    "Обнаружены возможные XML-конфликты",
+                    "Файлы готовы, но найдены совпадающие идентификаторы XML. "
+                    "Это не всегда ошибка, однако может менять игровой контент.\n\n"
+                    + preview + "\n\nВсё равно применить профиль?",
+                    parent=self,
+                )
+                if not proceed:
+                    return
+
             core.apply_to_config_player(mods)
-            messagebox.showinfo("Готово", "Профиль применен в config_player.xml!")
+            messagebox.showinfo("Готово", "Профиль применён в config_player.xml!")
         except Exception as e:
-            messagebox.showerror("Ошибка", str(e))
+            messagebox.showerror("Ошибка", str(e), parent=self)
 
     def download_and_add_to_profile(self):
         if self._profile_job_running:
