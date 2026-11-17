@@ -2638,11 +2638,11 @@ class BaroModManagerCore:
 
         readiness_errors = validate_profile_packages(mods_list, self.local_mods_dir)
         if readiness_errors:
-            preview = "\\n".join(f"• {item}" for item in readiness_errors[:12])
+            preview = "\n".join(f"• {item}" for item in readiness_errors[:12])
             if len(readiness_errors) > 12:
-                preview += f"\\n…и ещё {len(readiness_errors) - 12}"
+                preview += f"\n…и ещё {len(readiness_errors) - 12}"
             raise ValueError(
-                "Проверка профиля не пройдена; config_player.xml не изменён:\\n" + preview
+                "Проверка профиля не пройдена; config_player.xml не изменён:\n" + preview
             )
 
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -5081,11 +5081,11 @@ class ModManagerGUI(tk.Tk):
                             [{"id": mid, "title": mid} for mid in collection_ids],
                         )
                         message = (
-                            f"В файле сборки: {result['left_count']}\\n"
-                            f"В Steam Collection: {result['right_count']}\\n"
-                            f"Общих модов: {result['common_count']}\\n"
-                            f"Только в сборке: {len(result['only_left'])}\\n"
-                            f"Только в коллекции: {len(result['only_right'])}\\n\\n"
+                            f"В файле сборки: {result['left_count']}\n"
+                            f"В Steam Collection: {result['right_count']}\n"
+                            f"Общих модов: {result['common_count']}\n"
+                            f"Только в сборке: {len(result['only_left'])}\n"
+                            f"Только в коллекции: {len(result['only_right'])}\n\n"
                             + ("Порядок общих модов совпадает." if result["same_order"] else
                                "Порядок отличается или в коллекции изменён состав.")
                         )
@@ -5114,7 +5114,7 @@ class ModManagerGUI(tk.Tk):
             return
         if not messagebox.askyesno(
             "Установка модов",
-            f"Нужно загрузить {len(missing)} модов.\\nИспользуется Steam CDN, затем SteamCMD с повторными попытками. Продолжить?",
+            f"Нужно загрузить {len(missing)} модов.\nИспользуется Steam CDN, затем SteamCMD с повторными попытками. Продолжить?",
             parent=self,
         ):
             return
@@ -5145,7 +5145,7 @@ class ModManagerGUI(tk.Tk):
                         self._refresh_workshop_card_states()
                         messagebox.showinfo(
                             "Установка модов",
-                            f"Успешно: {installed} из {len(missing)}\\nНе удалось: {len(failed)}",
+                            f"Успешно: {installed} из {len(missing)}\nНе удалось: {len(failed)}",
                             parent=self,
                         )
                         self._report_failed(failed, metadata)
