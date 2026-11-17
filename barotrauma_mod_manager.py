@@ -4295,7 +4295,7 @@ class ModManagerGUI(tk.Tk):
         safe_name = re.sub(r'[\\/:*?"<>|]+', "_", build_name).strip(" ._") or "Barotrauma_Build"
         selected_path = filedialog.asksaveasfilename(
             parent=self,
-            title="Сохранить сборку",
+            title=self._tr("Сохранить сборку"),
             initialdir=str(self._build_packs_directory()),
             initialfile=f"{safe_name}.bmm-pack",
             defaultextension=".bmm-pack",
@@ -4316,9 +4316,10 @@ class ModManagerGUI(tk.Tk):
             temp.write_bytes(payload)
             os.replace(temp, output)
             messagebox.showinfo(
-                "Сборка сохранена",
-                f"Сборка «{build_name}» сохранена.\nМодов: {len(mods)}\n\n"
-                f"Файл можно передать другу: {output}",
+                self._tr("Сборка сохранена"),
+                f"{self._tr('Сборка сохранена')}: {build_name}\n"
+                f"{self._tr('Модов: ')}{len(mods)}\n\n"
+                f"{self._tr('Файл можно передать другу: ')}{output}",
                 parent=self,
             )
             self.log(f"[Build] Экспортирована сборка «{build_name}»: {len(mods)} модов.")
@@ -4331,7 +4332,7 @@ class ModManagerGUI(tk.Tk):
             return
         selected_path = filedialog.askopenfilename(
             parent=self,
-            title="Импортировать сборку",
+            title=self._tr("Импорт сборки"),
             initialdir=str(self._build_packs_directory()),
             filetypes=(("Barotrauma Mod Manager pack", "*.bmm-pack"), ("Все файлы", "*.*")),
         )
@@ -4353,14 +4354,15 @@ class ModManagerGUI(tk.Tk):
             target_name = f"{base_name[:40 - len(suffix_text)].rstrip()}{suffix_text}"
             suffix += 1
 
+        confirm_text = (
+            f"{self._tr('Сборка: ')}{pack['name']}\n"
+            f"{self._tr('Модов: ')}{pack['mod_count']}\n"
+            f"{self._tr('Описание: ')}{pack['description'] or '—'}\n\n"
+            f"{self._tr('Будет создан отдельный профиль: ')}{target_name}\n"
+            f"{self._tr('Существующие профили и файлы модов не изменятся. Продолжить?')}"
+        )
         confirm = messagebox.askyesno(
-            "Импорт сборки",
-            f"Сборка: {pack['name']}\n"
-            f"Модов: {pack['mod_count']}\n"
-            f"Описание: {pack['description'] or '—'}\n\n"
-            f"Будет создан отдельный профиль «{target_name}». "
-            "Существующие профили и файлы модов не изменятся. Продолжить?",
-            parent=self,
+            self._tr("Импорт сборки"), confirm_text, parent=self,
         )
         if not confirm:
             return
@@ -4443,13 +4445,14 @@ class ModManagerGUI(tk.Tk):
                 if error:
                     messagebox.showerror("Импорт сборки", error, parent=self)
                 else:
+                    import_summary = (
+                        f"{self._tr('Создан профиль: ')}{profile_name}\n"
+                        f"{self._tr('Модов в сборке: ')}{imported_count}\n"
+                        f"{self._tr('Файлов модов пока нет локально: ')}{missing_count}\n\n"
+                        f"{self._tr('Список и порядок сохранены. Отсутствующие моды нужно загрузить через Workshop.')}"
+                    )
                     messagebox.showinfo(
-                        "Сборка импортирована",
-                        f"Создан профиль «{profile_name}».\n"
-                        f"Модов в сборке: {imported_count}.\n"
-                        f"Файлов модов пока нет локально: {missing_count}.\n\n"
-                        "Список и порядок сохранены. Отсутствующие моды нужно загрузить через Workshop.",
-                        parent=self,
+                        self._tr("Сборка импортирована"), import_summary, parent=self,
                     )
             self.after(0, finish)
 
