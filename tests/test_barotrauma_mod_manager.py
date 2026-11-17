@@ -171,7 +171,7 @@ with tempfile.TemporaryDirectory() as config_tmp:
     with tempfile.TemporaryDirectory() as pack_tmp:
         pack_path = Path(pack_tmp) / "shared.bmm-pack"
         pack_path.write_bytes(build_payload)
-    assert mod.read_build_pack(pack_path)["name"] == "My Shared Build"
+        assert mod.read_build_pack(pack_path)["name"] == "My Shared Build"
 
     # Build packs reject extra files instead of extracting arbitrary archive contents.
     extra_payload = io.BytesIO()
