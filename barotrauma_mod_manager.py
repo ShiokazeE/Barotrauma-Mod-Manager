@@ -261,6 +261,7 @@ def serialize_build_pack(
     build_name: str,
     description: str = "",
     source_profile: str = "",
+    steam_collection_id: str = "",
 ) -> bytes:
     """Create a small shareable pack containing metadata and the native ordered ModList."""
     name = str(build_name or "").strip()
@@ -285,12 +286,16 @@ def serialize_build_pack(
         manifest_mods.append({"id": mod_id, "title": title or f"Workshop_{mod_id}"})
 
     modlist_xml = serialize_barotrauma_modlist(mods, name)
+    collection_id = str(steam_collection_id or "").strip()
+    if collection_id and (not collection_id.isdigit() or not (5 <= len(collection_id) <= 20)):
+        raise ValueError("Steam Collection ID должен содержать от 5 до 20 цифр.")
     manifest = {
         "format": BUILD_PACK_FORMAT,
         "format_version": BUILD_PACK_FORMAT_VERSION,
         "name": name,
         "description": description,
         "source_profile": str(source_profile or "")[:100],
+        "steam_collection_id": collection_id,
         "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "mod_count": len(manifest_mods),
         "mods": manifest_mods,
@@ -368,6 +373,10 @@ def parse_build_pack_bytes(payload: bytes) -> dict:
             raise ValueError("Некорректное название мода в manifest.json.")
         manifest_ids.append(mod_id)
 
+    collection_id = str(manifest.get("steam_collection_id", "") or "").strip()
+    if collection_id and (not collection_id.isdigit() or not (5 <= len(collection_id) <= 20)):
+        raise ValueError("Steam Collection ID в manifest.json некорректен.")
+
     modlist_name, parsed_mods = parse_barotrauma_modlist_bytes(
         modlist_raw, name, reject_duplicates=True,
     )
@@ -380,6 +389,7 @@ def parse_build_pack_bytes(payload: bytes) -> dict:
         "name": name.strip(),
         "description": description.strip(),
         "source_profile": str(manifest.get("source_profile", ""))[:100],
+        "steam_collection_id": collection_id,
         "created_at": str(manifest.get("created_at", ""))[:64],
         "mods": parsed_mods,
         "mod_count": len(parsed_mods),
@@ -394,6 +404,78 @@ def read_build_pack(path: Path) -> dict:
     if size <= 0 or size > BUILD_PACK_MAX_BYTES:
         raise ValueError("Файл сборки пустой или превышает допустимый размер.")
     return parse_build_pack_bytes(path.read_bytes())
+
+
+def compare_mod_lists(left_mods: list[dict] | list[str], right_mods: list[dict] | list[str]) -> dict:
+    """Compare two ordered Workshop ID lists without mutating either input."""
+    def ids(items):
+        result = []
+        for item in items:
+            value = item.get("id", "") if isinstance(item, dict) else item
+            mod_id = str(value).strip()
+            if mod_id.isdigit() and mod_id not in result:
+                result.append(mod_id)
+        return result
+
+    left = ids(left_mods)
+    right = ids(right_mods)
+    left_set, right_set = set(left), set(right)
+    common_left = [mid for mid in left if mid in right_set]
+    common_right = [mid for mid in right if mid in left_set]
+    return {
+        "only_left": [mid for mid in left if mid not in right_set],
+        "only_right": [mid for mid in right if mid not in left_set],
+        "same_order": common_left == common_right,
+        "left_count": len(left),
+        "right_count": len(right),
+        "common_count": len(left_set & right_set),
+    }
+
+
+def parse_server_workshop_ids(text: str) -> list[str]:
+    """Parse a copied Workshop-ID-only field from server settings."""
+    raw = str(text or "").strip()
+    if not raw:
+        raise ValueError("Список Workshop ID пуст.")
+    tokens = [token for token in re.split(r"[,;\\s]+", raw) if token]
+    result = []
+    for token in tokens:
+        # Accept bare numeric IDs only: this prevents accidentally treating ports,
+        # server IDs, dates or unrelated config values as Workshop packages.
+        if not token.isdigit() or not (5 <= len(token) <= 20):
+            raise ValueError(f"Некорректное значение Workshop ID: {token}")
+        if token not in result:
+            result.append(token)
+    if not result:
+        raise ValueError("Не найдено ни одного Workshop ID.")
+    if len(result) > MODLIST_MAX_ITEMS:
+        raise ValueError(f"Список превышает {MODLIST_MAX_ITEMS} Workshop ID.")
+    return result
+
+
+def list_build_packs(directory: Path) -> tuple[list[dict], list[Path]]:
+    """Read the local Build Library. Invalid files are reported, never deleted."""
+    directory = Path(directory)
+    valid = []
+    invalid = []
+    if not directory.is_dir():
+        return valid, invalid
+    for path in sorted(directory.glob("*.bmm-pack"), key=lambda item: item.name.casefold()):
+        try:
+            pack = read_build_pack(path)
+            valid.append({
+                "path": path,
+                "name": pack["name"],
+                "description": pack["description"],
+                "mods": pack["mods"],
+                "mod_count": pack["mod_count"],
+                "steam_collection_id": pack.get("steam_collection_id", ""),
+                "created_at": pack.get("created_at", ""),
+                "modified_at": path.stat().st_mtime,
+            })
+        except (OSError, ValueError) as exc:
+            invalid.append(path)
+    return valid, invalid
 
 
 def serialize_barotrauma_modlist(mods: list[dict], preset_name: str) -> bytes:
@@ -504,6 +586,7 @@ class ProfileStore:
             "installed_versions": {},
             "profiles": {self.default_profile: []},
             "profile_sources": {},
+            "profile_history": {},
             "parallel_downloads": 2,
         }
         self.load()
@@ -560,6 +643,30 @@ class ProfileStore:
                 if str(name) in normalized_profiles and isinstance(source, dict)
             }
 
+            raw_history = self.data.get("profile_history")
+            if not isinstance(raw_history, dict):
+                raw_history = {}
+            normalized_history = {}
+            for profile_name, entries in raw_history.items():
+                if profile_name not in normalized_profiles or not isinstance(entries, list):
+                    continue
+                clean_entries = []
+                for entry in entries[-25:]:
+                    if not isinstance(entry, dict) or not isinstance(entry.get("mods"), list):
+                        continue
+                    clean_mods = []
+                    for mod in entry["mods"]:
+                        if isinstance(mod, dict) and str(mod.get("id", "")).isdigit():
+                            clean_mods.append(dict(mod))
+                    clean_entries.append({
+                        "created_at": str(entry.get("created_at", ""))[:64],
+                        "label": str(entry.get("label", "Snapshot"))[:100],
+                        "mods": clean_mods,
+                    })
+                if clean_entries:
+                    normalized_history[str(profile_name)] = clean_entries
+            self.data["profile_history"] = normalized_history
+
             active = self.data.get("active_profile")
             if active not in normalized_profiles:
                 self.data["active_profile"] = next(iter(normalized_profiles))
@@ -571,7 +678,7 @@ class ProfileStore:
                 str(k): int(v) for k, v in versions.items()
                 if str(k).isdigit() and str(v).isdigit()
             }
-            self.data["schema_version"] = 3
+            self.data["schema_version"] = 4
             try:
                 parallel = int(self.data.get("parallel_downloads", 2))
             except (TypeError, ValueError):
@@ -597,16 +704,76 @@ class ProfileStore:
         with self._lock:
             return [dict(mod) for mod in self.data["profiles"].get(profile_name, [])]
 
-    def set_active_mods(self, mods: list[dict]):
-        with self._lock:
-            profile = self.data["active_profile"]
-            self.data["profiles"][profile] = [dict(mod) for mod in mods]
-            self.save()
+    def _snapshot_profile_locked(self, profile_name: str, label: str = "Изменение") -> bool:
+        current = self.data["profiles"].get(profile_name)
+        if not isinstance(current, list) or not current:
+            return False
+        history = self.data.setdefault("profile_history", {}).setdefault(profile_name, [])
+        snapshot = [dict(mod) for mod in current if isinstance(mod, dict)]
+        if history and history[-1].get("mods") == snapshot:
+            return False
+        history.append({
+            "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "label": str(label or "Изменение")[:100],
+            "mods": snapshot,
+        })
+        self.data["profile_history"][profile_name] = history[-25:]
+        return True
 
-    def set_profile_mods(self, profile_name: str, mods: list[dict]):
+    def snapshot_profile(self, profile_name: str, label: str = "Изменение") -> bool:
         with self._lock:
             if profile_name not in self.data["profiles"]:
                 raise KeyError(f"Профиль «{profile_name}» больше не существует.")
+            changed = self._snapshot_profile_locked(profile_name, label)
+            if changed:
+                self.save()
+            return changed
+
+    def get_profile_history(self, profile_name: str) -> list[dict]:
+        with self._lock:
+            entries = self.data.setdefault("profile_history", {}).get(profile_name, [])
+            return [
+                {
+                    "created_at": entry.get("created_at", ""),
+                    "label": entry.get("label", "Snapshot"),
+                    "mods": [dict(mod) for mod in entry.get("mods", [])],
+                }
+                for entry in entries
+            ]
+
+    def restore_profile_snapshot(self, profile_name: str, index: int) -> None:
+        with self._lock:
+            entries = self.data.setdefault("profile_history", {}).get(profile_name, [])
+            if profile_name not in self.data["profiles"]:
+                raise KeyError(f"Профиль «{profile_name}» больше не существует.")
+            if not isinstance(index, int) or not (0 <= index < len(entries)):
+                raise IndexError("Снимок профиля больше не существует.")
+            current = [dict(mod) for mod in self.data["profiles"][profile_name]]
+            target = [dict(mod) for mod in entries[index].get("mods", [])]
+            if current == target:
+                return
+            self._snapshot_profile_locked(profile_name, "Перед восстановлением")
+            self.data["profiles"][profile_name] = target
+            source = self.data.setdefault("profile_sources", {}).get(profile_name, {})
+            if source.get("format") == "Barotrauma ModList":
+                source["order_mode"] = "manual"
+                source["ordered_ids"] = [str(mod.get("id", "")) for mod in target]
+            self.save()
+
+    def set_active_mods(self, mods: list[dict], snapshot: bool = False):
+        with self._lock:
+            profile = self.data["active_profile"]
+            if snapshot:
+                self._snapshot_profile_locked(profile, "Перед изменением порядка")
+            self.data["profiles"][profile] = [dict(mod) for mod in mods]
+            self.save()
+
+    def set_profile_mods(self, profile_name: str, mods: list[dict], snapshot: bool = True):
+        with self._lock:
+            if profile_name not in self.data["profiles"]:
+                raise KeyError(f"Профиль «{profile_name}» больше не существует.")
+            if snapshot:
+                self._snapshot_profile_locked(profile_name, "Перед обновлением профиля")
             self.data["profiles"][profile_name] = [dict(mod) for mod in mods]
             self.save()
 
