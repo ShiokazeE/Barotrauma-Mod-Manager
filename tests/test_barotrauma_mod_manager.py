@@ -473,6 +473,15 @@ with tempfile.TemporaryDirectory() as config_tmp:
         assert 'keep' in written and 'custom' in written and 'LocalMods/1234567890/filelist.xml' in written
         assert config.with_suffix('.xml.bak').is_file()
 
+        before_invalid_apply = config.read_bytes()
+        try:
+            core.apply_to_config_player([{'id': '1234567891', 'title': 'Missing package'}])
+        except ValueError as exc:
+            assert 'filelist.xml' in str(exc)
+        else:
+            raise AssertionError('Applying a profile with a missing package should fail preflight')
+        assert config.read_bytes() == before_invalid_apply, 'config_player.xml changed after failed preflight'
+
 print('PASS: core smoke tests')
 
 # SteamCMD integration logic: one process handles the whole batch and files are verified.
