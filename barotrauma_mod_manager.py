@@ -4456,7 +4456,7 @@ class ModManagerGUI(tk.Tk):
                         f"{self._tr('Создан профиль: ')}{profile_name}\n"
                         f"{self._tr('Модов в сборке: ')}{imported_count}\n"
                         f"{self._tr('Файлов модов пока нет локально: ')}{missing_count}\n\n"
-                        f"{self._tr('Список и порядок сохранены. Отсутствующие моды нужно загрузить через Workshop.')}"
+                        f"{self._tr('Список и порядок сохранены. Нажми «Проверить», чтобы загрузить отсутствующие моды.')}"
                     )
                     messagebox.showinfo(
                         self._tr("Сборка импортирована"), import_summary, parent=self,
