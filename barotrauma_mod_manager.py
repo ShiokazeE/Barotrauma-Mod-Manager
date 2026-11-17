@@ -5302,12 +5302,20 @@ class ModManagerGUI(tk.Tk):
                 merged_order = [str(item.get("id", "")) for item in merged_mods]
                 order_changed = original_order != merged_order
                 if not added_ids and not known_relationships_changed and not order_changed:
-                    messagebox.showinfo(
-                        "Проверка зависимостей",
-                        "\n".join(status_lines)
-                        + "\n\nНовых обязательных элементов нет. Состав и порядок не изменены.",
-                        parent=self,
-                    )
+                    if unavailable or truncated:
+                        messagebox.showwarning(
+                            "Проверка неполная",
+                            "\n".join(status_lines)
+                            + "\n\nНовых элементов по полученным данным не найдено, но часть зависимостей осталась непроверенной.",
+                            parent=self,
+                        )
+                    else:
+                        messagebox.showinfo(
+                            "Проверка зависимостей",
+                            "\n".join(status_lines)
+                            + "\n\nНовых обязательных элементов нет. Состав и порядок не изменены.",
+                            parent=self,
+                        )
                     return
 
                 added_preview = []
