@@ -41,6 +41,15 @@ with tempfile.TemporaryDirectory() as config_dir, tempfile.TemporaryDirectory() 
         # Exercise the English widget pass and make sure internal values stay stable.
         assert app.language == "en"
         assert app.notebook.tab(app.profile_tab, "text").strip() == "MY PROFILES"
+        assert app.notebook.tab(app.builds_tab, "text").strip() == "MY BUILDS"
+        assert hasattr(app, "build_library_tree")
+        translated_build_actions = {
+            child.cget("text")
+            for child in app._profile_action_widgets
+            if child.winfo_exists()
+        }
+        assert "REFRESH LIST" in translated_build_actions
+        assert "INSTALL MISSING" in translated_build_actions
         assert app.profile_combo.get() == "Main"
         assert app.workshop_type_combo.get() == "Mods"
         assert app.workshop_sort_combo.get() == "Most popular"
