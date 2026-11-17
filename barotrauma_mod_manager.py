@@ -16,7 +16,7 @@ import time
 import xml.etree.ElementTree as ET
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from urllib.parse import parse_qs, urljoin, urlparse
 import tkinter as tk
@@ -60,6 +60,7 @@ APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
 STATE_FILE = APP_DATA_DIR / "baro_profiles.json"
 LANGUAGE_FILE = APP_DATA_DIR / "language.json"
 STEAM_API_KEY_FILE = APP_DATA_DIR / "steam_api_key.dpapi"
+BUILD_PACKS_DIR = APP_DATA_DIR / "Builds"
 LEGACY_STATE_FILE = APP_DIR / "baro_profiles.json"
 if not STATE_FILE.exists() and LEGACY_STATE_FILE.exists():
     try:
@@ -104,6 +105,10 @@ UTILITY_KEYWORDS = (
 )
 MODLIST_MAX_BYTES = 5 * 1024 * 1024
 MODLIST_MAX_ITEMS = 2000
+BUILD_PACK_MAX_BYTES = 8 * 1024 * 1024
+BUILD_PACK_FORMAT = "barotrauma-mod-manager-pack"
+BUILD_PACK_FORMAT_VERSION = 1
+BUILD_PACK_MAX_DESCRIPTION = 2000
 
 
 def safe_extract_zip(zf: zipfile.ZipFile, destination: Path,
@@ -190,13 +195,10 @@ def find_filelist_root(path: Path, max_depth: int = 4) -> Path | None:
     return None
 
 
-def parse_barotrauma_modlist(xml_path: Path) -> tuple[str, list[dict]]:
-    """Parse a Barotrauma ModLists preset (<mods><Vanilla/><Workshop .../></mods>)."""
-    xml_path = Path(xml_path)
-    size = xml_path.stat().st_size
-    if size <= 0 or size > MODLIST_MAX_BYTES:
+def parse_barotrauma_modlist_bytes(raw: bytes, fallback_name: str = "Barotrauma ModList") -> tuple[str, list[dict]]:
+    """Parse a native Barotrauma ModLists XML payload without writing it to disk."""
+    if not raw or len(raw) > MODLIST_MAX_BYTES:
         raise ValueError("Размер XML-файла пустой или превышает 5 МБ.")
-    raw = xml_path.read_bytes()
     upper = raw.upper()
     if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
         raise ValueError("DTD и пользовательские XML-сущности в пресетах запрещены.")
@@ -210,7 +212,7 @@ def parse_barotrauma_modlist(xml_path: Path) -> tuple[str, list[dict]]:
     if root_tag != "mods":
         raise ValueError("Это не пресет Barotrauma: ожидается корневой элемент <mods>.")
 
-    preset_name = str(root.attrib.get("name") or xml_path.stem).strip()[:100]
+    preset_name = str(root.attrib.get("name") or fallback_name).strip()[:100]
     result: list[dict] = []
     seen: set[str] = set()
     for child in list(root):
@@ -233,6 +235,152 @@ def parse_barotrauma_modlist(xml_path: Path) -> tuple[str, list[dict]]:
     if not result:
         raise ValueError("В XML не найдено ни одного корректного элемента <Workshop id=.../>.")
     return preset_name, result
+
+
+def parse_barotrauma_modlist(xml_path: Path) -> tuple[str, list[dict]]:
+    """Parse a Barotrauma ModLists preset (<mods><Vanilla/><Workshop .../></mods>)."""
+    xml_path = Path(xml_path)
+    size = xml_path.stat().st_size
+    if size <= 0 or size > MODLIST_MAX_BYTES:
+        raise ValueError("Размер XML-файла пустой или превышает 5 МБ.")
+    return parse_barotrauma_modlist_bytes(xml_path.read_bytes(), xml_path.stem)
+
+
+def serialize_build_pack(
+    mods: list[dict],
+    build_name: str,
+    description: str = "",
+    source_profile: str = "",
+) -> bytes:
+    """Create a small shareable pack containing metadata and the native ordered ModList."""
+    name = str(build_name or "").strip()
+    description = str(description or "").strip()
+    if not name or len(name) > 40:
+        raise ValueError("Название сборки должно содержать от 1 до 40 символов.")
+    if len(description) > BUILD_PACK_MAX_DESCRIPTION:
+        raise ValueError(f"Описание сборки не должно превышать {BUILD_PACK_MAX_DESCRIPTION} символов.")
+    if not isinstance(mods, list) or not mods or len(mods) > MODLIST_MAX_ITEMS:
+        raise ValueError(f"Сборка должна содержать от 1 до {MODLIST_MAX_ITEMS} модов.")
+
+    manifest_mods = []
+    seen: set[str] = set()
+    for mod in mods:
+        if not isinstance(mod, dict):
+            raise ValueError("В профиле обнаружена некорректная запись мода.")
+        mod_id = str(mod.get("id", "")).strip()
+        if not mod_id.isdigit() or not (5 <= len(mod_id) <= 20) or mod_id in seen:
+            raise ValueError(f"Некорректный или повторяющийся Workshop ID: {mod_id or '(empty)'}")
+        seen.add(mod_id)
+        title = str(mod.get("title") or f"Workshop_{mod_id}").replace("\r", " ").replace("\n", " ").strip()[:200]
+        manifest_mods.append({"id": mod_id, "title": title or f"Workshop_{mod_id}"})
+
+    modlist_xml = serialize_barotrauma_modlist(mods, name)
+    manifest = {
+        "format": BUILD_PACK_FORMAT,
+        "format_version": BUILD_PACK_FORMAT_VERSION,
+        "name": name,
+        "description": description,
+        "source_profile": str(source_profile or "")[:100],
+        "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "mod_count": len(manifest_mods),
+        "mods": manifest_mods,
+    }
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+        archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"))
+        archive.writestr("ModList.xml", modlist_xml)
+    payload = output.getvalue()
+    if len(payload) > BUILD_PACK_MAX_BYTES:
+        raise ValueError("Сборка слишком большая для формата .bmm-pack.")
+    return payload
+
+
+def parse_build_pack_bytes(payload: bytes) -> dict:
+    """Validate and read a .bmm-pack archive. No archive paths are ever extracted."""
+    if not isinstance(payload, (bytes, bytearray)) or not payload or len(payload) > BUILD_PACK_MAX_BYTES:
+        raise ValueError("Файл сборки пустой или превышает допустимый размер.")
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(payload), "r") as archive:
+            infos = archive.infolist()
+            expected_names = {"manifest.json", "ModList.xml"}
+            names = [info.filename for info in infos]
+            if len(infos) != 2 or len(set(names)) != 2 or set(names) != expected_names:
+                raise ValueError("В .bmm-pack должны находиться только manifest.json и ModList.xml.")
+            total_size = 0
+            for info in infos:
+                if info.is_dir() or info.flag_bits & 0x1:
+                    raise ValueError("Папки и зашифрованные элементы в .bmm-pack запрещены.")
+                if "/" in info.filename or "\\" in info.filename or ":" in info.filename:
+                    raise ValueError("В .bmm-pack найден недопустимый путь.")
+                if info.file_size < 0 or info.file_size > MODLIST_MAX_BYTES:
+                    raise ValueError("Один из файлов сборки превышает допустимый размер.")
+                total_size += info.file_size
+                if total_size > BUILD_PACK_MAX_BYTES:
+                    raise ValueError("Распакованный .bmm-pack превышает допустимый размер.")
+            manifest_raw = archive.read("manifest.json")
+            modlist_raw = archive.read("ModList.xml")
+    except ValueError:
+        raise
+    except (zipfile.BadZipFile, OSError, RuntimeError, KeyError) as exc:
+        raise ValueError(f"Не удалось прочитать .bmm-pack: {exc}") from exc
+
+    try:
+        manifest = json.loads(manifest_raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("manifest.json содержит некорректный JSON или UTF-8.") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError("Некорректный manifest.json.")
+    if manifest.get("format") != BUILD_PACK_FORMAT:
+        raise ValueError("Это не сборка Barotrauma Mod Manager.")
+    if type(manifest.get("format_version")) is not int or manifest["format_version"] != BUILD_PACK_FORMAT_VERSION:
+        raise ValueError(f"Неподдерживаемая версия формата сборки: {manifest.get('format_version')!r}.")
+
+    name = manifest.get("name")
+    description = manifest.get("description", "")
+    mods_data = manifest.get("mods")
+    if not isinstance(name, str) or not name.strip() or len(name.strip()) > 40:
+        raise ValueError("Название сборки в manifest.json некорректно.")
+    if not isinstance(description, str) or len(description) > BUILD_PACK_MAX_DESCRIPTION:
+        raise ValueError("Описание сборки в manifest.json некорректно.")
+    if not isinstance(mods_data, list) or not 1 <= len(mods_data) <= MODLIST_MAX_ITEMS:
+        raise ValueError("Состав сборки в manifest.json некорректен.")
+    manifest_ids = []
+    for item in mods_data:
+        if not isinstance(item, dict):
+            raise ValueError("Некорректная запись мода в manifest.json.")
+        mod_id = str(item.get("id", "")).strip()
+        title = item.get("title", "")
+        if not mod_id.isdigit() or not (5 <= len(mod_id) <= 20) or mod_id in manifest_ids:
+            raise ValueError("manifest.json содержит недопустимый или повторяющийся Workshop ID.")
+        if not isinstance(title, str) or len(title) > 200:
+            raise ValueError("Некорректное название мода в manifest.json.")
+        manifest_ids.append(mod_id)
+
+    modlist_name, parsed_mods = parse_barotrauma_modlist_bytes(modlist_raw, name)
+    xml_ids = [str(item["id"]) for item in parsed_mods]
+    if manifest_ids != xml_ids:
+        raise ValueError("Список модов в manifest.json не совпадает с порядком в ModList.xml.")
+    if manifest.get("mod_count") != len(manifest_ids):
+        raise ValueError("Количество модов в manifest.json не совпадает с фактическим составом.")
+    return {
+        "name": name.strip(),
+        "description": description.strip(),
+        "source_profile": str(manifest.get("source_profile", ""))[:100],
+        "created_at": str(manifest.get("created_at", ""))[:64],
+        "mods": parsed_mods,
+        "mod_count": len(parsed_mods),
+        "modlist_name": modlist_name,
+    }
+
+
+def read_build_pack(path: Path) -> dict:
+    """Read a .bmm-pack file while enforcing the compressed file-size limit."""
+    path = Path(path)
+    size = path.stat().st_size
+    if size <= 0 or size > BUILD_PACK_MAX_BYTES:
+        raise ValueError("Файл сборки пустой или превышает допустимый размер.")
+    return parse_build_pack_bytes(path.read_bytes())
 
 
 def serialize_barotrauma_modlist(mods: list[dict], preset_name: str) -> bytes:
