@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Expanded the local Build Library with metadata editing, file-only deletion, collection linking, import registration, profile-to-build update and portable-copy export.
+- Added build/profile comparison, Steam Collection comparison, manual server Workshop-ID comparison and optional installation of missing build items.
+- Added Workshop child-item dependency checks through Steam GetDetails; dependency order is applied only after confirmation, preserves Lua For Barotrauma first, and rejects cycles or incomplete responses safely.
+- Added profile preflight before config_player.xml writes and up to 25 lightweight profile history snapshots with restore.
+- Added dependency metadata to `.bmm-pack` manifests while keeping older v1 packs readable.
+
 - Added the first portable `.bmm-pack` format containing build metadata and a native ordered ModList.
 - Added build export and import actions; imports create a new profile and never overwrite existing profiles.
 - Added archive validation, strict manifest/XML order checks and a per-user default Builds folder.
