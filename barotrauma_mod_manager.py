@@ -283,7 +283,27 @@ def serialize_build_pack(
             raise ValueError(f"Некорректный или повторяющийся Workshop ID: {mod_id or '(empty)'}")
         seen.add(mod_id)
         title = str(mod.get("title") or f"Workshop_{mod_id}").replace("\r", " ").replace("\n", " ").strip()[:200]
-        manifest_mods.append({"id": mod_id, "title": title or f"Workshop_{mod_id}"})
+        raw_dependencies = mod.get("dependencies", [])
+        if not isinstance(raw_dependencies, list):
+            raise ValueError(f"Некорректный список зависимостей для Workshop ID {mod_id}.")
+        dependencies = []
+        for dependency in raw_dependencies:
+            dependency_id = str(dependency).strip()
+            if (
+                not dependency_id.isdigit()
+                or not (5 <= len(dependency_id) <= 20)
+                or dependency_id == mod_id
+            ):
+                raise ValueError(f"Некорректный ID зависимости для Workshop ID {mod_id}: {dependency_id}")
+            if dependency_id not in dependencies:
+                dependencies.append(dependency_id)
+        if len(dependencies) > 100:
+            raise ValueError(f"Слишком много зависимостей у Workshop ID {mod_id}.")
+        manifest_mods.append({
+            "id": mod_id,
+            "title": title or f"Workshop_{mod_id}",
+            "dependencies": dependencies,
+        })
 
     modlist_xml = serialize_barotrauma_modlist(mods, name)
     collection_id = str(steam_collection_id or "").strip()
@@ -371,6 +391,20 @@ def parse_build_pack_bytes(payload: bytes) -> dict:
             raise ValueError("manifest.json содержит недопустимый или повторяющийся Workshop ID.")
         if not isinstance(title, str) or len(title) > 200:
             raise ValueError("Некорректное название мода в manifest.json.")
+        dependencies = item.get("dependencies", [])
+        if not isinstance(dependencies, list) or len(dependencies) > 100:
+            raise ValueError("Некорректный список зависимостей в manifest.json.")
+        normalized_dependencies = []
+        for dependency in dependencies:
+            dependency_id = str(dependency).strip()
+            if (
+                not dependency_id.isdigit()
+                or not (5 <= len(dependency_id) <= 20)
+                or dependency_id == mod_id
+                or dependency_id in normalized_dependencies
+            ):
+                raise ValueError("manifest.json содержит некорректный Workshop dependency ID.")
+            normalized_dependencies.append(dependency_id)
         manifest_ids.append(mod_id)
 
     collection_id = str(manifest.get("steam_collection_id", "") or "").strip()
@@ -383,6 +417,13 @@ def parse_build_pack_bytes(payload: bytes) -> dict:
     xml_ids = [str(item["id"]) for item in parsed_mods]
     if manifest_ids != xml_ids:
         raise ValueError("Список модов в manifest.json не совпадает с порядком в ModList.xml.")
+    manifest_by_id = {
+        str(item["id"]): item
+        for item in mods_data
+    }
+    for mod in parsed_mods:
+        dependency_ids = manifest_by_id[str(mod["id"])].get("dependencies", [])
+        mod["dependencies"] = [str(value) for value in dependency_ids]
     if type(manifest.get("mod_count")) is not int or manifest["mod_count"] != len(manifest_ids):
         raise ValueError("Количество модов в manifest.json не совпадает с фактическим составом.")
     return {
@@ -571,6 +612,8 @@ def merge_required_workshop_dependencies(
         raise ValueError(
             "В зависимостях обнаружен цикл: " + ", ".join(dict.fromkeys(cycles))
         )
+    for mod_id in ordered:
+        by_id[mod_id]["dependencies"] = list(graph.get(mod_id, []))
     ordered_mods = [by_id[mid] for mid in ordered]
     return ordered_mods, [mid for mid in ordered if mid in set(added_ids)]
 
