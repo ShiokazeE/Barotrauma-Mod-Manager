@@ -477,6 +477,38 @@ def list_build_packs(directory: Path) -> tuple[list[dict], list[Path]]:
             invalid.append(path)
     return valid, invalid
 
+def validate_profile_packages(mods: list[dict], local_mods_dir: Path) -> list[str]:
+    """Check IDs and local package manifests before writing the active game config."""
+    errors = []
+    if not mods:
+        return ["Профиль пуст."]
+    seen = set()
+    for index, mod in enumerate(mods, 1):
+        if not isinstance(mod, dict):
+            errors.append(f"Позиция {index}: некорректная запись мода.")
+            continue
+        mod_id = str(mod.get("id", "")).strip()
+        if not mod_id.isdigit() or not (5 <= len(mod_id) <= 20):
+            errors.append(f"Позиция {index}: некорректный Workshop ID «{mod_id}».")
+            continue
+        if mod_id in seen:
+            errors.append(f"Повторяющийся Workshop ID: {mod_id}.")
+            continue
+        seen.add(mod_id)
+        filelist = find_filelist_root(Path(local_mods_dir) / mod_id)
+        if filelist is None:
+            errors.append(f"{mod.get('title') or mod_id}: локальный filelist.xml не найден.")
+            continue
+        try:
+            root = ET.parse(filelist).getroot()
+            if str(root.tag).split("}")[-1].casefold() != "contentpackage":
+                errors.append(f"{mod.get('title') or mod_id}: filelist.xml имеет неожиданный корневой элемент.")
+        except (ET.ParseError, OSError) as exc:
+            errors.append(f"{mod.get('title') or mod_id}: filelist.xml повреждён ({exc}).")
+    return errors
+
+
+
 
 def serialize_barotrauma_modlist(mods: list[dict], preset_name: str) -> bytes:
     """Serialize the current profile into Barotrauma's shareable ModLists format."""
@@ -4504,6 +4536,423 @@ class ModManagerGUI(tk.Tk):
             if game_dir.is_dir():
                 return game_dir
         return Path.home()
+
+    def _build_packs_directory(self) -> Path:
+        BUILD_PACKS_DIR.mkdir(parents=True, exist_ok=True)
+        return BUILD_PACKS_DIR
+
+    def _selected_build_entries(self) -> list[dict]:
+        if not hasattr(self, "build_library_tree"):
+            return []
+        return [
+            self._build_library_entries[iid]
+            for iid in self.build_library_tree.selection()
+            if iid in self._build_library_entries
+        ]
+
+    def refresh_build_library(self):
+        if not hasattr(self, "build_library_tree"):
+            return
+        tree = self.build_library_tree
+        for iid in tree.get_children():
+            tree.delete(iid)
+        self._build_library_entries = {}
+        entries, invalid = list_build_packs(self._build_packs_directory())
+        for index, entry in enumerate(entries):
+            iid = f"build_{index}"
+            collection_id = entry.get("steam_collection_id", "")
+            collection_label = f"#{collection_id}" if collection_id else "—"
+            modified = datetime.fromtimestamp(entry["modified_at"]).strftime("%Y-%m-%d %H:%M")
+            tree.insert(
+                "", "end", iid=iid,
+                values=(
+                    entry["name"], entry["mod_count"], collection_label,
+                    modified, entry["path"].name,
+                ),
+            )
+            self._build_library_entries[iid] = entry
+        status = f"Сборок: {len(entries)} · Папка: {self._build_packs_directory()}"
+        if invalid:
+            status += f" · Повреждённых файлов: {len(invalid)} (не удалены)"
+        self.build_library_status_var.set(status)
+        if not entries:
+            self.build_details_var.set("Пока нет сохранённых сборок. Используй «СОХРАНИТЬ СБОРКУ» в профилях.")
+        else:
+            self.build_details_var.set("Выбери сборку, чтобы посмотреть описание и действия.")
+        if hasattr(self, "build_details_var"):
+            self._on_build_library_selection()
+
+    def _on_build_library_selection(self, _event=None):
+        entries = self._selected_build_entries()
+        if not entries:
+            return
+        if len(entries) > 1:
+            self.build_details_var.set(
+                f"Выбрано сборок: {len(entries)}. Нажми «СРАВНИТЬ С ПРОФИЛЕМ» — сравнятся первые две."
+            )
+            return
+        entry = entries[0]
+        description = entry.get("description") or "Описание не задано."
+        collection_id = entry.get("steam_collection_id", "")
+        collection = (
+            f"Steam Collection: https://steamcommunity.com/sharedfiles/filedetails/?id={collection_id}"
+            if collection_id else "Steam Collection не привязана."
+        )
+        ids = [str(mod.get("id", "")) for mod in entry.get("mods", [])]
+        preview = ", ".join(ids[:10]) + (f" … ещё {len(ids) - 10}" if len(ids) > 10 else "")
+        self.build_details_var.set(
+            f"{entry['name']} · {entry['mod_count']} модов\n{description}\n{collection}\nWorkshop ID: {preview}"
+        )
+
+    @staticmethod
+    def _atomic_write_build_pack(path: Path, payload: bytes):
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(path.name + ".tmp")
+        try:
+            temporary.write_bytes(payload)
+            os.replace(temporary, path)
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def edit_selected_build(self):
+        selected = self._selected_build_entries()
+        if len(selected) != 1:
+            messagebox.showinfo("Библиотека сборок", "Выбери одну сборку для редактирования.", parent=self)
+            return
+        entry = selected[0]
+        path = entry["path"]
+        try:
+            pack = read_build_pack(path)
+        except Exception as exc:
+            messagebox.showerror("Сборка", str(exc), parent=self)
+            self.refresh_build_library()
+            return
+
+        name = simpledialog.askstring(
+            "Редактировать сборку", "Название (до 40 символов):",
+            initialvalue=pack["name"], parent=self,
+        )
+        if name is None:
+            return
+        name = name.strip()
+        if not name or len(name) > 40:
+            messagebox.showwarning("Сборка", "Название должно содержать от 1 до 40 символов.", parent=self)
+            return
+        description = simpledialog.askstring(
+            "Описание сборки", "Описание (до 2000 символов):",
+            initialvalue=pack["description"], parent=self,
+        )
+        if description is None:
+            return
+        collection = simpledialog.askstring(
+            "Steam Collection", "ID или URL коллекции (оставь пустым, чтобы отвязать):",
+            initialvalue=pack.get("steam_collection_id", ""), parent=self,
+        )
+        if collection is None:
+            return
+        try:
+            collection_id = self._get_core().extract_steam_id(collection.strip()) if collection.strip() else ""
+            payload = serialize_build_pack(
+                pack["mods"], name, description, pack.get("source_profile", ""),
+                steam_collection_id=collection_id,
+            )
+            self._atomic_write_build_pack(path, payload)
+            self.refresh_build_library()
+            messagebox.showinfo("Сборка", "Метаданные сборки обновлены.", parent=self)
+        except Exception as exc:
+            messagebox.showerror("Редактирование сборки", str(exc), parent=self)
+
+    def delete_selected_build(self):
+        selected = self._selected_build_entries()
+        if len(selected) != 1:
+            messagebox.showinfo("Библиотека сборок", "Выбери одну сборку для удаления.", parent=self)
+            return
+        path = Path(selected[0]["path"])
+        directory = self._build_packs_directory().resolve()
+        try:
+            if path.resolve().parent != directory or path.suffix.casefold() != ".bmm-pack":
+                raise ValueError("Файл сборки находится вне локальной библиотеки.")
+            if not messagebox.askyesno(
+                "Удалить сборку",
+                f"Удалить файл «{path.name}»?\\nПрофили и локальные файлы модов не затрагиваются.",
+                parent=self,
+            ):
+                return
+            path.unlink()
+            self.refresh_build_library()
+            self.log(f"[Build] Удалён файл сборки {path.name}; профили и моды не менялись.")
+        except Exception as exc:
+            messagebox.showerror("Удаление сборки", str(exc), parent=self)
+
+    def import_selected_build(self):
+        selected = self._selected_build_entries()
+        if len(selected) != 1:
+            messagebox.showinfo("Библиотека сборок", "Выбери одну сборку для импорта.", parent=self)
+            return
+        path = Path(selected[0]["path"])
+        try:
+            pack = read_build_pack(path)
+        except Exception as exc:
+            messagebox.showerror("Импорт сборки", str(exc), parent=self)
+            return
+        self._begin_import_build_pack(path, pack)
+
+    def compare_selected_build(self):
+        selected = self._selected_build_entries()
+        if len(selected) == 2:
+            left_name, left_mods = selected[0]["name"], selected[0]["mods"]
+            right_name, right_mods = selected[1]["name"], selected[1]["mods"]
+        elif len(selected) == 1:
+            left_name, left_mods = selected[0]["name"], selected[0]["mods"]
+            right_name = f"Профиль: {self.store.data['active_profile']}"
+            right_mods = self.store.get_active_mods()
+        else:
+            messagebox.showinfo(
+                "Сравнение сборок",
+                "Выбери одну сборку для сравнения с активным профилем или две сборки для сравнения между собой.",
+                parent=self,
+            )
+            return
+        self._show_mod_comparison(left_name, left_mods, right_name, right_mods)
+
+    def _show_mod_comparison(self, left_name: str, left_mods: list[dict], right_name: str, right_mods: list[dict]):
+        comparison = compare_mod_lists(left_mods, right_mods)
+        dialog = tk.Toplevel(self)
+        dialog.title("Сравнение сборок")
+        dialog.geometry("760x540")
+        dialog.configure(bg=BG)
+        tk.Label(
+            dialog,
+            text=f"{left_name}  ↔  {right_name}",
+            bg=BG, fg=TEXT, font=("Segoe UI", 11, "bold"),
+            wraplength=710, justify="left",
+        ).pack(anchor="w", padx=16, pady=(16, 8))
+        order_text = "Порядок общих модов совпадает." if comparison["same_order"] else (
+            "Порядок общих модов отличается — проверь рекомендации авторов."
+        )
+        tk.Label(
+            dialog,
+            text=(
+                f"Всего: {comparison['left_count']} ↔ {comparison['right_count']} · "
+                f"Совпадает: {comparison['common_count']}\\n{order_text}"
+            ),
+            bg=BG, fg="#9eb2c6", font=("Segoe UI", 9), justify="left",
+        ).pack(anchor="w", padx=16, pady=(0, 10))
+        body = tk.Frame(dialog, bg=BG)
+        body.pack(fill="both", expand=True, padx=16, pady=(0, 12))
+        body.columnconfigure(0, weight=1)
+        body.columnconfigure(1, weight=1)
+        body.rowconfigure(1, weight=1)
+        tk.Label(body, text=f"Только в {left_name} ({len(comparison['only_left'])})",
+                 bg=BG, fg="#f0c078", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w")
+        tk.Label(body, text=f"Только в {right_name} ({len(comparison['only_right'])})",
+                 bg=BG, fg="#7bdcb2", font=("Segoe UI", 9, "bold")).grid(row=0, column=1, sticky="w")
+        left_box = scrolledtext.ScrolledText(body, bg="#0b1118", fg=TEXT, font=("Consolas", 9), relief="flat")
+        right_box = scrolledtext.ScrolledText(body, bg="#0b1118", fg=TEXT, font=("Consolas", 9), relief="flat")
+        left_box.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(6, 0))
+        right_box.grid(row=1, column=1, sticky="nsew", padx=(6, 0), pady=(6, 0))
+        left_titles = {str(item.get("id")): str(item.get("title", item.get("id"))) for item in left_mods}
+        right_titles = {str(item.get("id")): str(item.get("title", item.get("id"))) for item in right_mods}
+        for mod_id in comparison["only_left"]:
+            left_box.insert(tk.END, f"{left_titles.get(mod_id, mod_id)}\\n{mod_id}\\n\\n")
+        for mod_id in comparison["only_right"]:
+            right_box.insert(tk.END, f"{right_titles.get(mod_id, mod_id)}\\n{mod_id}\\n\\n")
+        left_box.config(state="disabled")
+        right_box.config(state="disabled")
+        tk.Button(dialog, text="ЗАКРЫТЬ", command=dialog.destroy, bg=PANEL_ALT, fg=TEXT,
+                  relief="flat", padx=16, pady=7).pack(anchor="e", padx=16, pady=(0, 14))
+
+    def open_selected_collection(self):
+        selected = self._selected_build_entries()
+        if len(selected) != 1 or not selected[0].get("steam_collection_id"):
+            messagebox.showinfo("Steam Collection", "У выбранной сборки не привязана Steam Collection.", parent=self)
+            return
+        collection_id = selected[0]["steam_collection_id"]
+        webbrowser.open(f"https://steamcommunity.com/sharedfiles/filedetails/?id={collection_id}")
+
+    def compare_selected_collection(self):
+        selected = self._selected_build_entries()
+        if len(selected) != 1:
+            messagebox.showinfo("Steam Collection", "Выбери одну сборку.", parent=self)
+            return
+        entry = selected[0]
+        collection_id = str(entry.get("steam_collection_id", ""))
+        if not collection_id:
+            messagebox.showinfo("Steam Collection", "Сначала привяжи коллекцию через «Редактировать».", parent=self)
+            return
+        if self._profile_job_running:
+            return
+        core = self._get_core()
+        self._set_profile_job(True)
+
+        def worker():
+            error = None
+            result = None
+            try:
+                collection_ids = core.fetch_collection_items(collection_id)
+                result = compare_mod_lists(entry["mods"], collection_ids)
+            except Exception as exc:
+                error = str(exc)
+            if not self._closing:
+                def finish():
+                    self._set_profile_job(False)
+                    if error:
+                        messagebox.showerror("Steam Collection", error, parent=self)
+                    else:
+                        message = (
+                            f"В файле сборки: {result['left_count']}\\n"
+                            f"В Steam Collection: {result['right_count']}\\n"
+                            f"Общих модов: {result['common_count']}\\n"
+                            f"Только в сборке: {len(result['only_left'])}\\n"
+                            f"Только в коллекции: {len(result['only_right'])}\\n\\n"
+                            + ("Порядок общих модов совпадает." if result["same_order"] else
+                               "Порядок отличается или в коллекции изменён состав.")
+                        )
+                        messagebox.showinfo("Проверка Steam Collection", message, parent=self)
+                self.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def install_missing_from_build(self):
+        selected = self._selected_build_entries()
+        if len(selected) != 1:
+            messagebox.showinfo("Установка модов", "Выбери одну сборку.", parent=self)
+            return
+        entry = selected[0]
+        core = self._get_core()
+        missing = [
+            str(mod["id"]) for mod in entry["mods"]
+            if not find_filelist_root(core.local_mods_dir / str(mod["id"]))
+            and not core._find_source(str(mod["id"]))
+        ]
+        if not missing:
+            messagebox.showinfo("Установка модов", "Все моды сборки уже доступны локально.", parent=self)
+            return
+        if not messagebox.askyesno(
+            "Установка модов",
+            f"Нужно загрузить {len(missing)} модов.\\nИспользуется Steam CDN, затем SteamCMD с повторными попытками. Продолжить?",
+            parent=self,
+        ):
+            return
+        if self._profile_job_running:
+            return
+        self._set_profile_job(True)
+
+        def worker():
+            error = None
+            failed = {}
+            try:
+                metadata = core.fetch_mods_metadata(missing)
+            except Exception as exc:
+                self.log(f"[Build] Метаданные Steam недоступны ({exc}); пробую SteamCMD по Workshop ID.")
+                metadata = {}
+            try:
+                failed = core.acquire_mods(missing, metadata=metadata)
+            except Exception as exc:
+                error = str(exc)
+            if not self._closing:
+                def finish():
+                    self._set_profile_job(False)
+                    if error:
+                        messagebox.showerror("Установка модов", error, parent=self)
+                    else:
+                        installed = len(missing) - len(failed)
+                        self._refresh_mod_listbox()
+                        self._refresh_workshop_card_states()
+                        messagebox.showinfo(
+                            "Установка модов",
+                            f"Успешно: {installed} из {len(missing)}\\nНе удалось: {len(failed)}",
+                            parent=self,
+                        )
+                        self._report_failed(failed, metadata)
+                self.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def compare_selected_server(self):
+        selected = self._selected_build_entries()
+        if len(selected) > 1:
+            messagebox.showinfo("Сервер", "Для сравнения с сервером выбери только одну сборку.", parent=self)
+            return
+        if selected:
+            left_name, left_mods = selected[0]["name"], selected[0]["mods"]
+        else:
+            left_name = f"Профиль: {self.store.data['active_profile']}"
+            left_mods = self.store.get_active_mods()
+        server_text = simpledialog.askstring(
+            "Сравнение с сервером",
+            "Вставь только Workshop Mod IDs из настроек сервера (через запятую или с новой строки).\\n"
+            "Не вставляй порт или другие параметры сервера.",
+            parent=self,
+        )
+        if server_text is None:
+            return
+        try:
+            server_ids = parse_server_workshop_ids(server_text)
+        except ValueError as exc:
+            messagebox.showwarning("Список сервера", str(exc), parent=self)
+            return
+        self._show_mod_comparison(
+            left_name, left_mods, "Моды сервера", [{"id": mid, "title": mid} for mid in server_ids],
+        )
+
+    def show_profile_history(self):
+        profile_name = str(self.store.data.get("active_profile", ""))
+        entries = self.store.get_profile_history(profile_name)
+        dialog = tk.Toplevel(self)
+        dialog.title(f"История профиля — {profile_name}")
+        dialog.geometry("680x420")
+        dialog.configure(bg=BG)
+        tk.Label(
+            dialog, text=f"История: {profile_name} · снимков: {len(entries)}",
+            bg=BG, fg=TEXT, font=("Segoe UI", 10, "bold"),
+        ).pack(anchor="w", padx=14, pady=(14, 8))
+        table = ttk.Treeview(dialog, columns=("date", "label", "count"), show="headings", selectmode="browse")
+        for column, heading, width in (
+            ("date", "ДАТА", 190), ("label", "ИЗМЕНЕНИЕ", 320), ("count", "МОДЫ", 70),
+        ):
+            table.heading(column, text=heading)
+            table.column(column, width=width, anchor="w" if column == "label" else "center")
+        table.pack(fill="both", expand=True, padx=14, pady=(0, 10))
+        for index, item in enumerate(reversed(entries)):
+            table.insert(
+                "", "end", iid=str(index),
+                values=(item["created_at"], item["label"], len(item["mods"])),
+            )
+        def restore():
+            selection = table.selection()
+            if not selection:
+                return
+            history_index = len(entries) - 1 - int(selection[0])
+            if not messagebox.askyesno(
+                "Восстановить снимок",
+                "Текущий профиль будет сохранён в истории, затем выбранный снимок станет активным. Продолжить?",
+                parent=dialog,
+            ):
+                return
+            try:
+                self.store.restore_profile_snapshot(profile_name, history_index)
+                if profile_name == self.store.data.get("active_profile"):
+                    self._refresh_mod_listbox()
+                    self._update_profile_order_indicator()
+                messagebox.showinfo(
+                    "История профиля",
+                    "Снимок восстановлен. Нажми «ПРИМЕНИТЬ В ИГРУ», когда будешь готов применить этот порядок.",
+                    parent=dialog,
+                )
+                dialog.destroy()
+            except Exception as exc:
+                messagebox.showerror("История профиля", str(exc), parent=dialog)
+        footer = tk.Frame(dialog, bg=BG)
+        footer.pack(fill="x", padx=14, pady=(0, 14))
+        tk.Button(footer, text="ВОССТАНОВИТЬ ВЫБРАННОЕ", command=restore,
+                  bg="#315947", fg="white", relief="flat", padx=14, pady=7).pack(side="left")
+        tk.Button(footer, text="ЗАКРЫТЬ", command=dialog.destroy,
+                  bg=PANEL_ALT, fg=TEXT, relief="flat", padx=14, pady=7).pack(side="right")
 
     def _build_packs_directory(self) -> Path:
         BUILD_PACKS_DIR.mkdir(parents=True, exist_ok=True)
