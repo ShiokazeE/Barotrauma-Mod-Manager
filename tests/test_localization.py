@@ -21,6 +21,17 @@ class LocalizationTests(unittest.TestCase):
         self.assertEqual(translate("СОХРАНИТЬ СБОРКУ", "en"), "SAVE BUILD")
         self.assertEqual(translate("ИМПОРТ СБОРКИ", "en"), "IMPORT BUILD")
         self.assertEqual(translate("МОИ СБОРКИ", "en"), "MY BUILDS")
+        self.assertEqual(translate("БИБЛИОТЕКА СБОРОК", "en"), "BUILD LIBRARY")
+        self.assertEqual(translate("ОБНОВИТЬ СПИСОК", "en"), "REFRESH LIST")
+        self.assertEqual(translate("СРАВНИТЬ С ПРОФИЛЕМ", "en"), "COMPARE WITH PROFILE")
+        self.assertEqual(translate("ПРОВЕРИТЬ STEAM COLLECTION", "en"), "CHECK STEAM COLLECTION")
+        self.assertEqual(translate("ОТКРЫТЬ COLLECTION", "en"), "OPEN COLLECTION")
+        self.assertEqual(translate("СРАВНИТЬ С СЕРВЕРОМ", "en"), "COMPARE WITH SERVER")
+        self.assertEqual(translate("ИСТОРИЯ ПРОФИЛЯ", "en"), "PROFILE HISTORY")
+        self.assertEqual(
+            translate("Скачать отсутствующие моды сразу после импорта?", "en"),
+            "Download missing mods immediately after import?",
+        )
         self.assertEqual(translate("ПРОВЕРИТЬ ЗАВИСИМОСТИ", "en"), "CHECK DEPENDENCIES")
         self.assertEqual(translate("ОБНОВИТЬ ИЗ ПРОФИЛЯ", "en"), "UPDATE FROM PROFILE")
         self.assertEqual(translate("ЭКСПОРТ КОПИИ", "en"), "EXPORT COPY")
