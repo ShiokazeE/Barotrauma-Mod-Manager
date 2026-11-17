@@ -50,6 +50,9 @@ with tempfile.TemporaryDirectory() as config_dir, tempfile.TemporaryDirectory() 
         }
         assert "REFRESH LIST" in translated_build_actions
         assert "INSTALL MISSING" in translated_build_actions
+        assert "CHECK DEPENDENCIES" in translated_build_actions
+        assert "UPDATE FROM PROFILE" in translated_build_actions
+        assert "EXPORT COPY" in translated_build_actions
         assert app.profile_combo.get() == "Main"
         assert app.workshop_type_combo.get() == "Mods"
         assert app.workshop_sort_combo.get() == "Most popular"
