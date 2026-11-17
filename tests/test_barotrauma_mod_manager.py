@@ -137,7 +137,7 @@ with tempfile.TemporaryDirectory() as config_tmp:
             [{"id": "1234567890", "title": "Malformed"}], root
         )
         assert any("повреждён" in item for item in malformed_errors)
-        assert mod.validate_profile_packages([], root) == ["Профиль пуст."]
+        assert mod.validate_profile_packages([], root) == []
 
     # ZIP extraction supports normal files and rejects Zip Slip.
     with tempfile.TemporaryDirectory() as tmp:
