@@ -29,6 +29,7 @@ Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma
 - **Multiple profiles** — create, copy, switch and remove mod profiles.
 - **Load-order tools** — manual moves, conservative automatic priority, author ModList XML import/export.
 - **Author order preservation** — import Barotrauma's `ModLists/*.xml` without silently reordering it.
+- **Portable builds** — save a profile as one `.bmm-pack` file with metadata and exact author order; import it as a separate profile.
 - **Update checks** — compare installed versions with Workshop metadata and download updates.
 - **Conflict inspection** — scan XML identifiers for possible overlaps.
 - **LuaCs helper** — install the client patch with a backup and rollback option.
@@ -82,6 +83,14 @@ The Workshop browser uses Steam's `IPublishedFileService/QueryFiles` endpoint. A
 The manager reuses an existing Steam client cache when possible, tries an allowed Steam CDN URL when the API supplies one, and falls back to SteamCMD. Steam does not provide a direct file URL for every Workshop item. The manager does not bypass ownership, subscription, privacy or access restrictions.
 
 For large collections, the application supports up to three isolated SteamCMD workers with independent caches. More workers do not guarantee faster downloads; use the setting that behaves best on your connection.
+
+## Portable builds
+
+Save the active profile as one `.bmm-pack` file. It contains a manifest and the native `ModList.xml` in the author's exact order. Workshop mod binaries are not copied into the package; it is a portable mod list, not a mirror of third-party files.
+
+When imported, the manager validates the manifest against the XML and creates a separate profile. Existing profiles and installed mod files are not overwritten. Mods that are not installed locally are marked as missing. Press **Check Updates** to download missing mods from Steam Workshop.
+
+The default save location is `%LOCALAPPDATA%/BarotraumaModManager/Builds`; a different folder can be selected in the save dialog.
 
 ## Load order and Barotrauma XML
 
