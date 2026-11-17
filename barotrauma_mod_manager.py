@@ -195,7 +195,9 @@ def find_filelist_root(path: Path, max_depth: int = 4) -> Path | None:
     return None
 
 
-def parse_barotrauma_modlist_bytes(raw: bytes, fallback_name: str = "Barotrauma ModList") -> tuple[str, list[dict]]:
+def parse_barotrauma_modlist_bytes(
+    raw: bytes, fallback_name: str = "Barotrauma ModList", reject_duplicates: bool = False,
+) -> tuple[str, list[dict]]:
     """Parse a native Barotrauma ModLists XML payload without writing it to disk."""
     if not raw or len(raw) > MODLIST_MAX_BYTES:
         raise ValueError("Размер XML-файла пустой или превышает 5 МБ.")
@@ -224,6 +226,8 @@ def parse_barotrauma_modlist_bytes(raw: bytes, fallback_name: str = "Barotrauma 
         if not mod_id.isdigit() or not (5 <= len(mod_id) <= 20):
             continue
         if mod_id in seen:
+            if reject_duplicates:
+                raise ValueError(f"Повторяющийся Workshop ID в ModList.xml: {mod_id}")
             continue
         seen.add(mod_id)
         title = str(child.attrib.get("name") or f"Workshop_{mod_id}").strip()
@@ -357,11 +361,13 @@ def parse_build_pack_bytes(payload: bytes) -> dict:
             raise ValueError("Некорректное название мода в manifest.json.")
         manifest_ids.append(mod_id)
 
-    modlist_name, parsed_mods = parse_barotrauma_modlist_bytes(modlist_raw, name)
+    modlist_name, parsed_mods = parse_barotrauma_modlist_bytes(
+        modlist_raw, name, reject_duplicates=True,
+    )
     xml_ids = [str(item["id"]) for item in parsed_mods]
     if manifest_ids != xml_ids:
         raise ValueError("Список модов в manifest.json не совпадает с порядком в ModList.xml.")
-    if manifest.get("mod_count") != len(manifest_ids):
+    if type(manifest.get("mod_count")) is not int or manifest["mod_count"] != len(manifest_ids):
         raise ValueError("Количество модов в manifest.json не совпадает с фактическим составом.")
     return {
         "name": name.strip(),
@@ -4327,7 +4333,7 @@ class ModManagerGUI(tk.Tk):
             parent=self,
             title="Импортировать сборку",
             initialdir=str(self._build_packs_directory()),
-            filetypes=(("Barotrauma Mod Manager pack", "*.bmm-pack"), ("ZIP", "*.zip"), ("Все файлы", "*.*")),
+            filetypes=(("Barotrauma Mod Manager pack", "*.bmm-pack"), ("Все файлы", "*.*")),
         )
         if not selected_path:
             return
