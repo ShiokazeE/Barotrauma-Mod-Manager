@@ -437,7 +437,7 @@ def parse_server_workshop_ids(text: str) -> list[str]:
     raw = str(text or "").strip()
     if not raw:
         raise ValueError("Список Workshop ID пуст.")
-    tokens = [token for token in re.split(r"[,;\\s]+", raw) if token]
+    tokens = [token for token in re.split(r"[,;\s]+", raw) if token]
     result = []
     for token in tokens:
         # Accept bare numeric IDs only: this prevents accidentally treating ports,
@@ -3191,7 +3191,7 @@ class ModManagerGUI(tk.Tk):
         builds.rowconfigure(1, weight=1)
         build_toolbar = card(builds, padx=12, pady=10)
         build_toolbar.grid(row=0, column=0, sticky="we", pady=(0, 8))
-        label(build_toolbar, "БИБЛИОТЕКА СБОРOК", size=9, color=ACCENT, bold=True).pack(anchor="w", pady=(0, 8))
+        label(build_toolbar, "БИБЛИОТЕКА СБОРОК", size=9, color=ACCENT, bold=True).pack(anchor="w", pady=(0, 8))
         build_actions = tk.Frame(build_toolbar, bg=PANEL)
         build_actions.pack(fill="x")
         button(build_actions, "ОБНОВИТЬ СПИСОК", self.refresh_build_library,
@@ -3210,6 +3210,8 @@ class ModManagerGUI(tk.Tk):
                color="#4b3b69", hover="#655087").pack(side="left", padx=(0, 5))
         button(build_actions2, "ПРОВЕРИТЬ STEAM COLLECTION", self.compare_selected_collection,
                color="#4b3b69", hover="#655087").pack(side="left", padx=(0, 5))
+        button(build_actions2, "ОТКРЫТЬ COLLECTION", self.open_selected_collection,
+               color="#244b63", hover="#2c607d").pack(side="left", padx=(0, 5))
         button(build_actions2, "СРАВНИТЬ С СЕРВЕРОМ", self.compare_selected_server,
                color="#4b3b69", hover="#655087").pack(side="left", padx=(0, 5))
         button(build_actions2, "ИСТОРИЯ ПРОФИЛЯ", self.show_profile_history,
@@ -4400,6 +4402,7 @@ class ModManagerGUI(tk.Tk):
         if messagebox.askyesno("Удаление", f"Удалить профиль «{cur}»?"):
             del self.store.data["profiles"][cur]
             self.store.data.setdefault("profile_sources", {}).pop(cur, None)
+            self.store.data.setdefault("profile_history", {}).pop(cur, None)
             self.store.data["active_profile"] = next(iter(self.store.data["profiles"]))
             self.store.save()
             self._refresh_profile_selector()
@@ -4415,6 +4418,7 @@ class ModManagerGUI(tk.Tk):
         mods = self.store.get_active_mods()
         new_idx = idx + direction
         if 0 <= new_idx < len(mods):
+            self.store.snapshot_profile(self.store.data["active_profile"], "Перед ручной перестановкой")
             mods[idx], mods[new_idx] = mods[new_idx], mods[idx]
             self.store.set_active_mods(mods)
             source = self.store.data.setdefault("profile_sources", {}).get(self.store.data["active_profile"])
@@ -4486,6 +4490,14 @@ class ModManagerGUI(tk.Tk):
         )
         if full_delete is None:
             return
+
+        # Snapshot every profile that will actually lose this item.
+        if full_delete:
+            for profile_name, profile_mods in list(self.store.data["profiles"].items()):
+                if any(str(mod.get("id", "")) == mid for mod in profile_mods):
+                    self.store.snapshot_profile(profile_name, "Перед глобальным удалением мода")
+        else:
+            self.store.snapshot_profile(self.store.data["active_profile"], "Перед удалением мода из профиля")
 
         core = self._get_core()
         try:
@@ -4824,6 +4836,9 @@ class ModManagerGUI(tk.Tk):
             return
         entry = selected[0]
         core = self._get_core()
+        if not core.game_dir.is_dir():
+            messagebox.showwarning("Папка игры", "Сначала укажи существующую папку Barotrauma.", parent=self)
+            return
         missing = [
             str(mod["id"]) for mod in entry["mods"]
             if not find_filelist_root(core.local_mods_dir / str(mod["id"]))
@@ -5619,11 +5634,42 @@ class ModManagerGUI(tk.Tk):
             return
         try:
             core = self._get_core()
-            mods = self.store.get_active_mods()
+            mods = self.store.get_profile_mods(self.store.data["active_profile"])
+            readiness_errors = validate_profile_packages(mods, core.local_mods_dir)
+            if readiness_errors:
+                preview = "\n".join(f"• {item}" for item in readiness_errors[:12])
+                if len(readiness_errors) > 12:
+                    preview += f"\n…и ещё {len(readiness_errors) - 12}"
+                messagebox.showwarning(
+                    "Проверка сборки не пройдена",
+                    "Профиль не применён: сначала исправь проблемы с локальными файлами.\n\n"
+                    + preview + "\n\nЗагрузи недостающие моды через Workshop и повтори проверку.",
+                    parent=self,
+                )
+                return
+
+            conflicts = core.detect_conflicts(mods)
+            if conflicts:
+                preview = "\n".join(
+                    f"• {identifier}: " + ", ".join(title for title, _mid in owners[:3])
+                    for identifier, owners in list(conflicts.items())[:8]
+                )
+                if len(conflicts) > 8:
+                    preview += f"\n…и ещё {len(conflicts) - 8} конфликтов"
+                proceed = messagebox.askyesno(
+                    "Обнаружены возможные XML-конфликты",
+                    "Файлы готовы, но найдены совпадающие идентификаторы XML. "
+                    "Это не всегда ошибка, однако может менять игровой контент.\n\n"
+                    + preview + "\n\nВсё равно применить профиль?",
+                    parent=self,
+                )
+                if not proceed:
+                    return
+
             core.apply_to_config_player(mods)
-            messagebox.showinfo("Готово", "Профиль применен в config_player.xml!")
+            messagebox.showinfo("Готово", "Профиль применён в config_player.xml!")
         except Exception as e:
-            messagebox.showerror("Ошибка", str(e))
+            messagebox.showerror("Ошибка", str(e), parent=self)
 
     def download_and_add_to_profile(self):
         if self._profile_job_running:
