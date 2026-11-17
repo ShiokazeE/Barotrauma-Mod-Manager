@@ -477,6 +477,104 @@ def list_build_packs(directory: Path) -> tuple[list[dict], list[Path]]:
             invalid.append(path)
     return valid, invalid
 
+def merge_required_workshop_dependencies(
+    mods: list[dict],
+    dependency_graph: dict[str, list[str]],
+    metadata: dict[str, dict] | None = None,
+) -> tuple[list[dict], list[str]]:
+    """Add missing required Workshop children before their parents, preserving other order."""
+    metadata = metadata or {}
+    original = []
+    by_id: dict[str, dict] = {}
+    for item in mods:
+        if not isinstance(item, dict):
+            continue
+        mod_id = str(item.get("id", "")).strip()
+        if not mod_id.isdigit() or not (5 <= len(mod_id) <= 20):
+            continue
+        if mod_id not in by_id:
+            copy = dict(item)
+            copy["id"] = mod_id
+            by_id[mod_id] = copy
+            original.append(mod_id)
+
+    if not original:
+        return [], []
+
+    graph: dict[str, list[str]] = {}
+    for parent, children in dependency_graph.items():
+        parent_id = str(parent)
+        if not parent_id.isdigit():
+            continue
+        valid_children = []
+        for child in children if isinstance(children, list) else []:
+            child_id = str(child).strip()
+            if child_id.isdigit() and 5 <= len(child_id) <= 20 and child_id != parent_id:
+                if child_id not in valid_children:
+                    valid_children.append(child_id)
+        graph[parent_id] = valid_children
+
+    required = set(original)
+    def collect(parent_id: str, visited: set[str]) -> None:
+        if parent_id in visited:
+            return
+        visited.add(parent_id)
+        for child_id in graph.get(parent_id, []):
+            required.add(child_id)
+            collect(child_id, visited)
+
+    for parent_id in original:
+        collect(parent_id, set())
+
+    added_ids = [mid for mid in required if mid not in by_id]
+    for mid in added_ids:
+        item = dict(metadata.get(mid, {}))
+        item["id"] = mid
+        item["title"] = str(item.get("title") or f"Workshop_{mid}")
+        item.setdefault("dependencies", [])
+        item["update_status"] = item.get("update_status") or "MISSING"
+        by_id[mid] = item
+
+    # Preserve Lua For Barotrauma as the first entry even if a package declares
+    # it as a child. Report no guessed order: its special placement is deliberate.
+    lua_id = "2559634234"
+    ordered: list[str] = []
+    visited: set[str] = set()
+    visiting: set[str] = set()
+    cycles: list[str] = []
+
+    def visit(mod_id: str) -> None:
+        if mod_id in visited:
+            return
+        if mod_id in visiting:
+            cycles.append(mod_id)
+            return
+        visiting.add(mod_id)
+        if mod_id != lua_id:
+            for child_id in graph.get(mod_id, []):
+                if child_id in required and child_id != lua_id:
+                    visit(child_id)
+        visiting.remove(mod_id)
+        visited.add(mod_id)
+        if mod_id not in ordered:
+            ordered.append(mod_id)
+
+    if lua_id in required:
+        ordered.append(lua_id)
+        visited.add(lua_id)
+    for mod_id in original:
+        visit(mod_id)
+    for mod_id in added_ids:
+        visit(mod_id)
+
+    if cycles:
+        raise ValueError(
+            "В зависимостях обнаружен цикл: " + ", ".join(dict.fromkeys(cycles))
+        )
+    ordered_mods = [by_id[mid] for mid in ordered]
+    return ordered_mods, [mid for mid in ordered if mid in set(added_ids)]
+
+
 def validate_profile_packages(mods: list[dict], local_mods_dir: Path) -> list[str]:
     """Check IDs and local package manifests before writing the active game config."""
     errors = []
@@ -1324,6 +1422,104 @@ class BaroModManagerCore:
                         "time_updated": 0,
                     }
         return metadata
+    def fetch_workshop_dependencies(
+        self, mod_ids: list[str], api_key: str, max_depth: int = 5,
+    ) -> tuple[dict[str, list[str]], list[str], bool]:
+        """Fetch Barotrauma-style Workshop children through IPublishedFileService/GetDetails."""
+        key = str(api_key or "").strip()
+        if not re.fullmatch(r"[A-Fa-f0-9]{32}", key):
+            raise ValueError("Steam Web API key должен состоять из 32 шестнадцатеричных символов.")
+
+        initial_ids = list(dict.fromkeys(
+            str(mid).strip() for mid in mod_ids
+            if str(mid).strip().isdigit() and 5 <= len(str(mid).strip()) <= 20
+        ))
+        if not initial_ids:
+            return {}, [], False
+        if len(initial_ids) > MODLIST_MAX_ITEMS:
+            raise ValueError(f"Нельзя проверять больше {MODLIST_MAX_ITEMS} Workshop ID за один раз.")
+
+        endpoint = "https://api.steampowered.com/IPublishedFileService/GetDetails/v1/"
+        graph: dict[str, list[str]] = {}
+        unavailable: set[str] = set()
+        seen: set[str] = set()
+        frontier = initial_ids[:]
+        truncated = False
+
+        for depth in range(max(1, min(int(max_depth), 5))):
+            batch = [mid for mid in frontier if mid not in seen]
+            if not batch:
+                break
+            next_frontier: list[str] = []
+            for start in range(0, len(batch), 50):
+                chunk = batch[start:start + 50]
+                params = {
+                    "key": key,
+                    "includechildren": "true",
+                }
+                params.update({
+                    f"publishedfileids[{index}]": mid
+                    for index, mid in enumerate(chunk)
+                })
+                response = self.session.get(endpoint, params=params, timeout=(10, 45))
+                if response.status_code in (401, 403):
+                    raise RuntimeError("Steam отклонил API key при проверке зависимостей.")
+                if response.status_code == 429:
+                    raise RuntimeError("Steam временно ограничил запросы зависимостей. Повтори проверку позже.")
+                response.raise_for_status()
+                body = response.json()
+                api_response = body.get("response", {}) if isinstance(body, dict) else {}
+                if not isinstance(api_response, dict):
+                    raise RuntimeError("Steam вернул неожиданный формат при проверке зависимостей.")
+                items = api_response.get("publishedfiledetails")
+                if not isinstance(items, list):
+                    raise RuntimeError("Steam не вернул список Workshop details для проверки зависимостей.")
+
+                found = set()
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    parent_id = str(item.get("publishedfileid", "")).strip()
+                    if parent_id not in chunk:
+                        continue
+                    found.add(parent_id)
+                    result_code = int(item.get("result", 0) or 0)
+                    consumer_app_id = int(item.get("consumer_app_id", 0) or 0)
+                    if result_code != 1 or consumer_app_id not in (0, int(BAROTRAUMA_APP_ID)):
+                        unavailable.add(parent_id)
+                        continue
+
+                    children = item.get("children")
+                    if not isinstance(children, list):
+                        # Do not report "no dependencies" when the endpoint omitted children.
+                        unavailable.add(parent_id)
+                        continue
+
+                    child_ids: list[str] = []
+                    for child in children:
+                        raw_id = child.get("publishedfileid", "") if isinstance(child, dict) else child
+                        child_id = str(raw_id).strip()
+                        if not child_id.isdigit() or not (5 <= len(child_id) <= 20):
+                            continue
+                        if child_id == parent_id or child_id in child_ids:
+                            continue
+                        child_ids.append(child_id)
+                    graph[parent_id] = child_ids
+                    next_frontier.extend(child_id for child_id in child_ids if child_id not in seen)
+
+                unavailable.update(mid for mid in chunk if mid not in found)
+
+            seen.update(batch)
+            frontier = list(dict.fromkeys(next_frontier))
+            if len(seen) + len(frontier) > MODLIST_MAX_ITEMS:
+                raise ValueError(
+                    f"Цепочка зависимостей превышает {MODLIST_MAX_ITEMS} элементов; проверка остановлена."
+                )
+            if depth == max(1, min(int(max_depth), 5)) - 1 and frontier:
+                truncated = True
+
+        return graph, sorted(unavailable), truncated
+
     def query_workshop(
         self, search_text: str, api_key: str, sort_mode: str = "relevance",
         cursor: str = "*", per_page: int = 24, content_type: str = "items",
