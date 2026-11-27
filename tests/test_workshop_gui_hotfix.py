@@ -38,6 +38,21 @@ with tempfile.TemporaryDirectory() as config_dir, tempfile.TemporaryDirectory() 
         app.notebook.select(app.workshop_tab)
         app.update_idletasks()
 
+        # Each major content section uses a draggable vertical sash.
+        assert app.profile_sections.cget("orient") == "vertical"
+        assert len(app.profile_sections.panes()) == 4
+        assert int(app.profile_sections.cget("sashwidth")) >= 8
+        assert app.workshop_sections.cget("orient") == "vertical"
+        assert len(app.workshop_sections.panes()) == 2
+
+        # Splitter positions are persisted as normalized ratios, not screen pixels.
+        profile_sash_y = app.profile_sections.sash_coord(0)[1]
+        app.profile_sections.sash_place(0, 0, profile_sash_y + 6)
+        app._save_paned_sizes(app.profile_sections, "profile_section_ratios")
+        saved_profile_ratios = app.store.data.get("profile_section_ratios")
+        assert isinstance(saved_profile_ratios, list) and len(saved_profile_ratios) == 3
+        assert all(0.0 < ratio < 1.0 for ratio in saved_profile_ratios)
+
         # Exercise the English widget pass and make sure internal values stay stable.
         assert app.language == "en"
         assert app.notebook.tab(app.profile_tab, "text").strip() == "MY PROFILES"
