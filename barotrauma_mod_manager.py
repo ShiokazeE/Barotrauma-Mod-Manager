@@ -1172,21 +1172,69 @@ class BaroModManagerCore:
             "return_playtime_stats": 0,
         }
         endpoint = "https://api.steampowered.com/IPublishedFileService/QueryFiles/v1/"
-        response = self.session.get(
-            endpoint,
-            params={"key": key, "input_json": json.dumps(payload, ensure_ascii=False)},
-            timeout=(12, 45),
+        request_started = time.monotonic()
+        page_kind = "first" if not cursor or str(cursor) == "*" else "next"
+        self.log(
+            f"[Workshop Search] Request: catalog={content_type}; sort={sort_mode}; "
+            f"appid={BAROTRAUMA_APP_ID}; query_chars={len(search_text)}; page={page_kind}."
         )
-        if response.status_code in (401, 403):
+        try:
+            response = self.session.get(
+                endpoint,
+                params={"key": key, "input_json": json.dumps(payload, ensure_ascii=False)},
+                timeout=(12, 45),
+            )
+        except requests.exceptions.Timeout as exc:
+            elapsed = time.monotonic() - request_started
+            self.log(
+                f"[Workshop Search] Timeout after {elapsed:.1f}s; "
+                f"catalog={content_type}; page={page_kind}."
+            )
+            raise RuntimeError(
+                "Steam API не ответил вовремя. Проверь подключение и повтори попытку позже."
+            ) from exc
+        except requests.exceptions.ConnectionError as exc:
+            elapsed = time.monotonic() - request_started
+            self.log(
+                f"[Workshop Search] Connection error after {elapsed:.1f}s; "
+                f"catalog={content_type}; page={page_kind}."
+            )
+            raise RuntimeError(
+                "Не удалось подключиться к Steam API. Проверь интернет, VPN или настройки сети."
+            ) from exc
+        except requests.exceptions.RequestException as exc:
+            elapsed = time.monotonic() - request_started
+            self.log(
+                f"[Workshop Search] HTTP client error ({type(exc).__name__}) "
+                f"after {elapsed:.1f}s; catalog={content_type}; page={page_kind}."
+            )
+            raise RuntimeError(
+                f"Ошибка сетевого запроса к Steam API ({type(exc).__name__})."
+            ) from exc
+
+        elapsed = time.monotonic() - request_started
+        status_code = int(getattr(response, "status_code", 0) or 0)
+        self.log(
+            f"[Workshop Search] HTTP {status_code}; elapsed={elapsed:.2f}s; "
+            f"catalog={content_type}; sort={sort_mode}; page={page_kind}."
+        )
+        if status_code in (401, 403):
             raise RuntimeError(
                 "Steam отклонил API key. Проверь ключ на https://steamcommunity.com/dev/apikey и повтори попытку."
             )
-        if response.status_code == 429:
+        if status_code == 429:
             raise RuntimeError("Steam временно ограничил частоту запросов. Повтори поиск через минуту.")
-        response.raise_for_status()
+        if status_code >= 500:
+            raise RuntimeError(f"Steam API временно недоступен (HTTP {status_code}).")
+        if status_code >= 400:
+            raise RuntimeError(f"Steam API отклонил запрос (HTTP {status_code}).")
         try:
             body = response.json()
         except ValueError as exc:
+            self.log(
+                f"[Workshop Search] Invalid JSON response; HTTP {status_code}; "
+                f"elapsed={time.monotonic() - request_started:.2f}s."
+            )
             raise RuntimeError("Steam вернул некорректный JSON при поиске Workshop.") from exc
         api_response = body.get("response", {}) if isinstance(body, dict) else {}
         if not isinstance(api_response, dict):
@@ -1201,17 +1249,22 @@ class BaroModManagerCore:
             raise RuntimeError("Steam API не вернул список Workshop-элементов.")
 
         normalized: list[dict] = []
+        invalid_items = 0
+        other_app_items = 0
         for item in raw_items:
             if not isinstance(item, dict):
+                invalid_items += 1
                 continue
             mid = str(item.get("publishedfileid", ""))
             if not mid.isdigit():
+                invalid_items += 1
                 continue
             try:
                 consumer_app = int(item.get("consumer_app_id", BAROTRAUMA_APP_ID) or BAROTRAUMA_APP_ID)
             except (TypeError, ValueError):
                 consumer_app = 0
             if consumer_app not in (0, int(BAROTRAUMA_APP_ID)):
+                other_app_items += 1
                 continue
             previews = item.get("previews") or []
             preview_url = str(item.get("preview_url", "") or "")
@@ -1259,6 +1312,17 @@ class BaroModManagerCore:
             next_cursor = None
         else:
             next_cursor = next_cursor_text
+
+        elapsed = time.monotonic() - request_started
+        self.log(
+            f"[Workshop Search] Response: raw={len(raw_items)}; accepted={len(normalized)}; "
+            f"invalid={invalid_items}; other_app={other_app_items}; elapsed={elapsed:.2f}s."
+        )
+        if raw_items and not normalized:
+            self.log(
+                "[Workshop Search] Steam returned entries, but none passed the local "
+                "Barotrauma ID/app validation checks."
+            )
         return normalized, str(next_cursor) if next_cursor else None
 
     def resolve_all_dependencies(self, initial_ids: list[str]) -> dict[str, dict]:
