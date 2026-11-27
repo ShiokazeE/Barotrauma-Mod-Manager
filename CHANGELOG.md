@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added Discord-style draggable splitters for profile sections and the Workshop search/results layout.
+- Saved section proportions between launches and restored them with pane minimums.
+
+
 - Added redacted Steam Workshop request/response diagnostics, result validation counters, and clearer network timeout/connection errors. API keys are never included in diagnostic messages.
 
 - Added the first portable `.bmm-pack` format containing build metadata and a native ordered ModList.
