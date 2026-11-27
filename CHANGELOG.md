@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added a one-click **Play** button that launches Barotrauma through Steam's `steam://run/602960` protocol.
+- Added Discord-style draggable splitters for profile sections and the Workshop search/results layout.
+- Saved section proportions between launches and restored them with pane minimums.
+
+
 - Added Discord-style draggable splitters for profile sections and the Workshop search/results layout.
 - Saved section proportions between launches and restored them with pane minimums.
 
