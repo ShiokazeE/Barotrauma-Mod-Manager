@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added redacted Steam Workshop request/response diagnostics, result validation counters, and clearer network timeout/connection errors. API keys are never included in diagnostic messages.
+
 - Added the first portable `.bmm-pack` format containing build metadata and a native ordered ModList.
 - Added build export and import actions; imports create a new profile and never overwrite existing profiles.
 - Added archive validation, strict manifest/XML order checks and a per-user default Builds folder.
