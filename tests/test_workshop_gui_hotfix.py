@@ -4,6 +4,7 @@ import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +63,7 @@ with tempfile.TemporaryDirectory() as config_dir, tempfile.TemporaryDirectory() 
 
         # Exercise the English widget pass and make sure internal values stay stable.
         assert app.language == "en"
+        assert app.play_game_btn.cget("text") == "▶ PLAY"
         assert app.notebook.tab(app.profile_tab, "text").strip() == "MY PROFILES"
         assert app.profile_combo.get() == "Main"
         assert app.workshop_type_combo.get() == "Mods"
@@ -127,4 +129,13 @@ with tempfile.TemporaryDirectory() as config_dir, tempfile.TemporaryDirectory() 
         app._closing = True
         app.destroy()
 
-print("PASS: Tkinter Workshop wheel + resize debounce smoke test")
+# The Play action must dispatch the official Steam protocol, never a guessed executable path.
+with mock.patch.object(mod.os, "startfile", create=True) as start_file:
+    launch_app = mod.ModManagerGUI.__new__(mod.ModManagerGUI)
+    launch_logs = []
+    launch_app.log = launch_logs.append
+    assert launch_app.launch_game() is True
+    start_file.assert_called_once_with("steam://run/602960")
+    assert any("passed to Steam" in line for line in launch_logs)
+
+print("PASS: Tkinter Workshop resize + Barotrauma launch smoke tests")
