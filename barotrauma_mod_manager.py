@@ -2295,7 +2295,7 @@ class ModManagerGUI(tk.Tk):
         super().__init__()
         self.language = choose_or_load_language(self, LANGUAGE_FILE)
         self._install_dialog_localization()
-        self.title("Barotrauma Mod Manager 2.7.1")
+        self.title("Barotrauma Mod Manager 2.7.2")
         self.geometry("1260x860")
         self.minsize(1020, 720)
         self.configure(bg="#101318")
