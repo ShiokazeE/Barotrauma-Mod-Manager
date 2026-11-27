@@ -3127,13 +3127,10 @@ class ModManagerGUI(tk.Tk):
             ),
             add="+",
         )
-        self.after(
-            250,
-            lambda: self._restore_paned_sizes(
-                self.workshop_sections,
-                "workshop_section_ratios",
-                self.workshop_sections_min_sizes,
-            ),
+        self.notebook.bind(
+            "<<NotebookTabChanged>>",
+            self._restore_active_section_sizes,
+            add="+",
         )
         self.workshop_next_cursor = None
         self.workshop_last_query = ""
@@ -3444,6 +3441,31 @@ class ModManagerGUI(tk.Tk):
             widget.config(state=state)
         if not running:
             self._refresh_workshop_card_states()
+
+    def _restore_active_section_sizes(self, _event=None):
+        """Restore the selected tab's splitters after its panes become visible."""
+        if getattr(self, "_closing", False):
+            return
+        try:
+            selected = self.notebook.select()
+            if selected == str(self.profile_tab):
+                self.after_idle(
+                    lambda: self._restore_paned_sizes(
+                        self.profile_sections,
+                        "profile_section_ratios",
+                        self.profile_sections_min_sizes,
+                    )
+                )
+            elif selected == str(self.workshop_tab):
+                self.after_idle(
+                    lambda: self._restore_paned_sizes(
+                        self.workshop_sections,
+                        "workshop_section_ratios",
+                        self.workshop_sections_min_sizes,
+                    )
+                )
+        except (tk.TclError, AttributeError):
+            return
 
     def _save_paned_sizes(self, paned: tk.PanedWindow, data_key: str):
         """Persist splitter positions as ratios so they survive window resizing."""
