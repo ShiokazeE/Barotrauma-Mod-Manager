@@ -2560,6 +2560,34 @@ class ModManagerGUI(tk.Tk):
             variable.trace_add("write", localize_variable)
             localize_variable()
 
+    def launch_game(self) -> bool:
+        """Ask Steam to launch Barotrauma through its registered protocol handler."""
+        steam_uri = f"steam://run/{BAROTRAUMA_APP_ID}"
+        try:
+            if os.name == "nt":
+                # Windows shell dispatches the Steam protocol to the installed Steam client.
+                start_file = getattr(os, "startfile", None)
+                if start_file is None:
+                    raise OSError("Windows URI handler is unavailable.")
+                start_file(steam_uri)
+            else:
+                if not webbrowser.open(steam_uri, new=1):
+                    raise OSError("No application accepted the Steam launch URI.")
+        except Exception as exc:
+            self.log(f"[Game] Launch request failed ({type(exc).__name__}).")
+            messagebox.showerror(
+                self._tr("Ошибка запуска"),
+                self._tr(
+                    "Не удалось передать запуск Barotrauma клиенту Steam. "
+                    "Проверь, что Steam установлен и обработчик steam:// доступен."
+                ),
+                parent=self,
+            )
+            return False
+
+        self.log("[Game] Запрос запуска Barotrauma передан Steam.")
+        return True
+
     def _change_language(self):
         target = "en" if self.language == "ru" else "ru"
         question = (
@@ -2725,7 +2753,12 @@ class ModManagerGUI(tk.Tk):
             header_actions, "⚙ НАСТРОЙКИ", self.toggle_paths_panel,
             color="#203b4d", hover="#2a536b", pady=8,
         )
-        self.paths_toggle_btn.pack(side="right")
+        self.paths_toggle_btn.pack(side="right", padx=(0, 7))
+        self.play_game_btn = button(
+            header_actions, "▶ ИГРАТЬ", self.launch_game,
+            color="#17785d", hover="#218e70", pady=8,
+        )
+        self.play_game_btn.pack(side="right")
 
         # Installation paths are tucked away until needed to keep the main screen clean.
         paths_bar = card(main, padx=12, pady=7)
