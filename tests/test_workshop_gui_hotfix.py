@@ -35,7 +35,6 @@ with tempfile.TemporaryDirectory() as config_dir, tempfile.TemporaryDirectory() 
     app = mod.ModManagerGUI()
     try:
         app.geometry("1260x860")
-        app.notebook.select(app.workshop_tab)
         app.update_idletasks()
 
         # Each major content section uses a draggable vertical sash.
@@ -45,13 +44,21 @@ with tempfile.TemporaryDirectory() as config_dir, tempfile.TemporaryDirectory() 
         assert app.workshop_sections.cget("orient") == "vertical"
         assert len(app.workshop_sections.panes()) == 2
 
-        # Splitter positions are persisted as normalized ratios, not screen pixels.
+        # The profile tab must be mapped before its sash positions can be tested.
+        app.notebook.select(app.profile_tab)
+        app.update_idletasks()
         profile_sash_y = app.profile_sections.sash_coord(0)[1]
+        assert app.profile_sections.winfo_height() > 160
+
+        # Splitter positions are persisted as normalized ratios, not screen pixels.
         app.profile_sections.sash_place(0, 0, profile_sash_y + 6)
         app._save_paned_sizes(app.profile_sections, "profile_section_ratios")
         saved_profile_ratios = app.store.data.get("profile_section_ratios")
         assert isinstance(saved_profile_ratios, list) and len(saved_profile_ratios) == 3
         assert all(0.0 < ratio < 1.0 for ratio in saved_profile_ratios)
+
+        app.notebook.select(app.workshop_tab)
+        app.update_idletasks()
 
         # Exercise the English widget pass and make sure internal values stay stable.
         assert app.language == "en"
