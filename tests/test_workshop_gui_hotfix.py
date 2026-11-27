@@ -62,8 +62,16 @@ with tempfile.TemporaryDirectory() as config_dir, tempfile.TemporaryDirectory() 
         assert isinstance(saved_profile_ratios, list) and len(saved_profile_ratios) == 3
         assert all(0.0 < ratio < 1.0 for ratio in saved_profile_ratios)
 
+        # Workshop proportions are restored on first tab activation, not while hidden.
+        app.store.data["workshop_section_ratios"] = [0.42]
         app.notebook.select(app.workshop_tab)
-        app.update_idletasks()
+        app.update()
+        workshop_height = app.workshop_sections.winfo_height()
+        workshop_sash_y = app.workshop_sections.sash_coord(0)[1]
+        assert workshop_height > 300
+        assert abs(workshop_sash_y - int(workshop_height * 0.42)) < 24, (
+            workshop_sash_y, workshop_height
+        )
 
         # Exercise the English widget pass and make sure internal values stay stable.
         assert app.language == "en"
