@@ -8,7 +8,7 @@
   <p>
     <img src="https://img.shields.io/badge/platform-Windows-2678c8?logo=windows&logoColor=white" alt="Windows">
     <img src="https://img.shields.io/badge/Python-3.10%2B-3776ab?logo=python&logoColor=white" alt="Python 3.10+">
-    <img src="https://img.shields.io/badge/version-2.7.1-17a673" alt="Version 2.7.1">
+    <img src="https://img.shields.io/badge/version-2.7.2-17a673" alt="Version 2.7.1">
     <img src="https://img.shields.io/badge/game-Barotrauma-0d6578" alt="Barotrauma">
     <a href="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/actions/workflows/ci.yml"><img src="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   </p>
@@ -16,7 +16,7 @@
 
 Barotrauma Mod Manager helps you browse Steam Workshop, install mods and collections, maintain separate load-order profiles, and apply a chosen profile to the game.
 
-> **Project status:** community project in active development. Version 2.7.1 has been tested on Windows; the portable Windows package is published with this release.
+> **Project status:** community project in active development. Version 2.7.2 includes resizable sections, a Steam Play button, and improved Workshop diagnostics. The portable Windows package is built by GitHub Actions.
 
 Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma-Mod-Manager/) · Source code: [GitHub repository](https://github.com/ShiokazeE/Barotrauma-Mod-Manager)
 
