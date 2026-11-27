@@ -2785,9 +2785,27 @@ class ModManagerGUI(tk.Tk):
         # Profile header: one compact strip instead of several competing cards.
         profile = self.profile_tab
         profile.columnconfigure(0, weight=1)
-        profile.rowconfigure(2, weight=1)
-        profile_bar = card(profile, padx=12, pady=8)
-        profile_bar.grid(row=0, column=0, sticky="we", pady=(0, 8))
+        profile.rowconfigure(0, weight=1)
+        self.profile_sections = tk.PanedWindow(
+            profile,
+            orient=tk.VERTICAL,
+            bg="#22313f",
+            bd=0,
+            relief=tk.FLAT,
+            sashwidth=10,
+            sashpad=1,
+            sashrelief=tk.RAISED,
+            sashcursor="sb_v_double_arrow",
+            handlesize=9,
+            handlepad=2,
+            showhandle=True,
+            opaqueresize=True,
+        )
+        self.profile_sections.grid(row=0, column=0, sticky="nsew")
+        self.profile_sections_min_sizes = (72, 76, 180, 96)
+
+        profile_bar = card(self.profile_sections, padx=12, pady=8)
+        self.profile_sections.add(profile_bar, minsize=72, stretch="never")
         label(profile_bar, "АКТИВНЫЙ ПРОФИЛЬ", size=8, color=ACCENT, bold=True).pack(anchor="w", pady=(0, 6))
         profile_actions = tk.Frame(profile_bar, bg=PANEL)
         profile_actions.pack(fill="x")
@@ -2819,8 +2837,8 @@ class ModManagerGUI(tk.Tk):
         )
         self.profile_order_info_label.pack(side="right", padx=(10, 0))
 
-        add_frame = card(profile, padx=12, pady=9)
-        add_frame.grid(row=1, column=0, sticky="we", pady=(0, 8))
+        add_frame = card(self.profile_sections, padx=12, pady=9)
+        self.profile_sections.add(add_frame, minsize=76, stretch="never")
         add_frame.columnconfigure(0, weight=1)
         label(add_frame, "БЫСТРОЕ ДОБАВЛЕНИЕ", size=8, color=ACCENT, bold=True).grid(
             row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
@@ -2838,8 +2856,8 @@ class ModManagerGUI(tk.Tk):
         )
         self.dl_btn.grid(row=1, column=1, sticky="e")
 
-        list_panel = card(profile, padx=12, pady=10)
-        list_panel.grid(row=2, column=0, sticky="nsew", pady=(0, 8))
+        list_panel = card(self.profile_sections, padx=12, pady=10)
+        self.profile_sections.add(list_panel, minsize=180, stretch="always")
         list_panel.columnconfigure(0, weight=1)
         list_panel.rowconfigure(2, weight=1)
 
@@ -2924,8 +2942,8 @@ class ModManagerGUI(tk.Tk):
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.mod_listbox.configure(yscrollcommand=scrollbar.set)
 
-        log_panel = card(profile, padx=12, pady=8)
-        log_panel.grid(row=3, column=0, sticky="we")
+        log_panel = card(self.profile_sections, padx=12, pady=8)
+        self.profile_sections.add(log_panel, minsize=96, stretch="never")
         label(log_panel, "ЖУРНАЛ ОПЕРАЦИЙ", size=8, color=ACCENT, bold=True).pack(anchor="w", pady=(0, 5))
         self.log_box = scrolledtext.ScrolledText(
             log_panel, bg="#0b1118", fg="#b7c7d7", font=("Consolas", 8),
@@ -2937,12 +2955,45 @@ class ModManagerGUI(tk.Tk):
         self.log_box.tag_configure("success", foreground="#6fe0ad")
         self.log_box.tag_configure("warning", foreground="#f4c77b")
 
-        # Workshop tab. Search and results keep the same palette and spacing.
+        self.profile_sections.bind(
+            "<ButtonRelease-1>",
+            lambda _event: self._save_paned_sizes(
+                self.profile_sections, "profile_section_ratios"
+            ),
+            add="+",
+        )
+        self.after(
+            250,
+            lambda: self._restore_paned_sizes(
+                self.profile_sections,
+                "profile_section_ratios",
+                self.profile_sections_min_sizes,
+            ),
+        )
+
+        # Workshop tab. Its search bar and results panel can also be resized.
         workshop = self.workshop_tab
         workshop.columnconfigure(0, weight=1)
-        workshop.rowconfigure(1, weight=1)
-        search_panel = card(workshop)
-        search_panel.grid(row=0, column=0, sticky="we", pady=(0, 8))
+        workshop.rowconfigure(0, weight=1)
+        self.workshop_sections = tk.PanedWindow(
+            workshop,
+            orient=tk.VERTICAL,
+            bg="#22313f",
+            bd=0,
+            relief=tk.FLAT,
+            sashwidth=10,
+            sashpad=1,
+            sashrelief=tk.RAISED,
+            sashcursor="sb_v_double_arrow",
+            handlesize=9,
+            handlepad=2,
+            showhandle=True,
+            opaqueresize=True,
+        )
+        self.workshop_sections.grid(row=0, column=0, sticky="nsew")
+        self.workshop_sections_min_sizes = (108, 220)
+        search_panel = card(self.workshop_sections)
+        self.workshop_sections.add(search_panel, minsize=108, stretch="never")
         search_panel.columnconfigure(0, weight=1)
         label(search_panel, "STEAM WORKSHOP", size=9, color=ACCENT, bold=True).grid(
             row=0, column=0, sticky="w", pady=(0, 7))
@@ -2985,8 +3036,8 @@ class ModManagerGUI(tk.Tk):
             size=8, color=MUTED, wraplength=1000, justify="left",
         ).grid(row=2, column=0, sticky="w", pady=(7, 2))
 
-        results_panel = card(workshop)
-        results_panel.grid(row=1, column=0, sticky="nsew")
+        results_panel = card(self.workshop_sections)
+        self.workshop_sections.add(results_panel, minsize=220, stretch="always")
         results_panel.columnconfigure(0, weight=1)
         results_panel.rowconfigure(1, weight=1)
         results_header = tk.Frame(results_panel, bg=PANEL)
@@ -3036,6 +3087,21 @@ class ModManagerGUI(tk.Tk):
         # Linux/X11 wheel events (harmless on Windows; they simply never fire there).
         self.bind_all("<Button-4>", self._on_workshop_mousewheel, add="+")
         self.bind_all("<Button-5>", self._on_workshop_mousewheel, add="+")
+        self.workshop_sections.bind(
+            "<ButtonRelease-1>",
+            lambda _event: self._save_paned_sizes(
+                self.workshop_sections, "workshop_section_ratios"
+            ),
+            add="+",
+        )
+        self.after(
+            250,
+            lambda: self._restore_paned_sizes(
+                self.workshop_sections,
+                "workshop_section_ratios",
+                self.workshop_sections_min_sizes,
+            ),
+        )
         self.workshop_next_cursor = None
         self.workshop_last_query = ""
         self.workshop_last_sort = "popular"
@@ -3345,6 +3411,72 @@ class ModManagerGUI(tk.Tk):
             widget.config(state=state)
         if not running:
             self._refresh_workshop_card_states()
+
+    def _save_paned_sizes(self, paned: tk.PanedWindow, data_key: str):
+        """Persist splitter positions as ratios so they survive window resizing."""
+        try:
+            height = int(paned.winfo_height())
+            pane_count = len(paned.panes())
+            if height < 160 or pane_count < 2:
+                return
+
+            ratios = []
+            for index in range(pane_count - 1):
+                _x, y = paned.sash_coord(index)
+                ratios.append(round(max(0.0, min(1.0, y / height)), 4))
+
+            if ratios:
+                self.store.data[data_key] = ratios
+                self.store.save()
+        except (tk.TclError, AttributeError, TypeError, ValueError, OSError):
+            # A resize can race with tab/window destruction; ignore that one save.
+            return
+
+    def _restore_paned_sizes(
+        self,
+        paned: tk.PanedWindow,
+        data_key: str,
+        min_sizes: tuple[int, ...],
+    ):
+        """Restore saved splitter ratios while respecting each pane's minimum size."""
+        try:
+            ratios = self.store.data.get(data_key)
+            pane_count = len(paned.panes())
+            if (
+                not isinstance(ratios, list)
+                or len(ratios) != pane_count - 1
+                or len(min_sizes) != pane_count
+            ):
+                return
+
+            paned.update_idletasks()
+            height = int(paned.winfo_height())
+            if height < sum(min_sizes) + 60:
+                return
+
+            sash_width = max(1, int(paned.cget("sashwidth")))
+            previous_y = 0
+            for index, ratio in enumerate(ratios):
+                try:
+                    ratio_value = float(ratio)
+                except (TypeError, ValueError):
+                    return
+                if not 0.0 < ratio_value < 1.0:
+                    return
+
+                lower_bound = sum(min_sizes[:index + 1]) + sash_width * (index + 1)
+                upper_bound = (
+                    height
+                    - sum(min_sizes[index + 1:])
+                    - sash_width * (pane_count - index - 1)
+                )
+                target_y = int(height * ratio_value)
+                target_y = max(lower_bound, min(target_y, upper_bound))
+                target_y = max(previous_y + min_sizes[index] + sash_width, target_y)
+                paned.sash_place(index, 0, target_y)
+                previous_y = target_y
+        except (tk.TclError, AttributeError, TypeError, ValueError):
+            return
 
     def _on_close(self):
         if self._profile_job_running or self._lua_job_running or self._steamcmd_job_running or self._workshop_job_running:
