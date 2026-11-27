@@ -47,9 +47,13 @@ with tempfile.TemporaryDirectory() as config_dir, tempfile.TemporaryDirectory() 
 
         # The profile tab must be mapped before its sash positions can be tested.
         app.notebook.select(app.profile_tab)
-        app.update_idletasks()
+        app.update()
         profile_sash_y = app.profile_sections.sash_coord(0)[1]
-        assert app.profile_sections.winfo_height() > 160
+        assert app.profile_sections.winfo_ismapped(), "Profile splitter was not mapped"
+        assert app.profile_sections.winfo_height() > 160, (
+            f"Profile splitter height is too small: {app.profile_sections.winfo_height()}, "
+            f"notebook={app.notebook.winfo_height()}, root={app.winfo_height()}"
+        )
 
         # Splitter positions are persisted as normalized ratios, not screen pixels.
         app.profile_sections.sash_place(0, 0, profile_sash_y + 6)
