@@ -371,7 +371,10 @@ print('PASS: forced refresh prefers the freshly downloaded package')
 
 # Steam Workshop catalog search: key handling, exact Barotrauma AppID, results and paging.
 with tempfile.TemporaryDirectory() as tmp:
-    core = mod.BaroModManagerCore(str(Path(tmp) / 'game'), '', log_callback=lambda _msg: None)
+    search_logs = []
+    core = mod.BaroModManagerCore(
+        str(Path(tmp) / 'game'), '', log_callback=search_logs.append
+    )
     class FakeResponse:
         status_code = 200
         def raise_for_status(self):
@@ -389,6 +392,12 @@ with tempfile.TemporaryDirectory() as tmp:
                         'creator': '76561198000000000',
                         'tags': [{'tag': 'content'}, {'tag': 'submarine'}],
                         'previews': [{'url': 'https://steamuserimages-a.akamaihd.net/preview.jpg'}],
+                    }, {
+                        'publishedfileid': 'not-an-id',
+                        'consumer_app_id': 602960,
+                    }, {
+                        'publishedfileid': '1234567891',
+                        'consumer_app_id': 999999,
                     }],
                     'next_cursor': 'cursor-next',
                 }
@@ -410,6 +419,27 @@ with tempfile.TemporaryDirectory() as tmp:
     request_json = json.loads(fake_session.last[1]['input_json'])
     assert request_json['appid'] == 602960 and request_json['creator_appid'] == 602960
     assert request_json['query_type'] == 12 and request_json['search_text'] == 'submarine'
+    diagnostic_text = "\\n".join(search_logs)
+    assert 'raw=3' in diagnostic_text and 'accepted=1' in diagnostic_text
+    assert 'invalid=1' in diagnostic_text and 'other_app=1' in diagnostic_text
+    assert ('a' * 32) not in diagnostic_text, 'Steam API key leaked into diagnostics'
+
+    # Network errors must be classified without exposing a URL that may contain the key.
+    secret_key = 'c' * 32
+    class TimeoutSession:
+        def get(self, url, params, timeout):
+            raise mod.requests.exceptions.Timeout(f"request failed: {url}?key={secret_key}")
+    core.session = TimeoutSession()
+    try:
+        core.query_workshop('timeout test', secret_key, 'relevance')
+    except RuntimeError as exc:
+        assert 'не ответил вовремя' in str(exc).lower()
+        assert secret_key not in str(exc)
+    else:
+        raise AssertionError('Steam API timeout was not converted to a safe user error')
+    timeout_logs = "\\n".join(search_logs)
+    assert secret_key not in timeout_logs, 'Steam API key leaked into timeout diagnostics'
+
     try:
         core.query_workshop('test', 'not-a-valid-key')
     except ValueError:
