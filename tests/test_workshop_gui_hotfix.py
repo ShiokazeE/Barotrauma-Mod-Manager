@@ -140,6 +140,6 @@ with mock.patch.object(mod.os, "startfile", create=True) as start_file:
     launch_app.log = launch_logs.append
     assert launch_app.launch_game() is True
     start_file.assert_called_once_with("steam://run/602960")
-    assert any("passed to Steam" in line for line in launch_logs)
+    assert any("передан Steam" in line for line in launch_logs)
 
 print("PASS: Tkinter Workshop resize + Barotrauma launch smoke tests")
