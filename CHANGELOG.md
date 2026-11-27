@@ -1,29 +1,17 @@
 # Changelog
 
-## Unreleased
+## 2.7.2 — Resizable UI and Steam launch
 
-- Added a one-click **Play** button that launches Barotrauma through Steam's `steam://run/602960` protocol.
-- Added Discord-style draggable splitters for profile sections and the Workshop search/results layout.
-- Saved section proportions between launches and restored them with pane minimums.
-
-
-- Added Discord-style draggable splitters for profile sections and the Workshop search/results layout.
-- Saved section proportions between launches and restored them with pane minimums.
-
-
-- Added redacted Steam Workshop request/response diagnostics, result validation counters, and clearer network timeout/connection errors. API keys are never included in diagnostic messages.
-
-- Added the first portable `.bmm-pack` format containing build metadata and a native ordered ModList.
-- Added build export and import actions; imports create a new profile and never overwrite existing profiles.
-- Added archive validation, strict manifest/XML order checks and a per-user default Builds folder.
-
-- Added a one-click Steam API key paste button plus Ctrl+V and Shift+Insert shortcuts.
-- Clipboard contents are validated before insertion; saved keys continue to use Windows DPAPI encryption.
+- Added Discord-style draggable splitters for the profile sections and Steam Workshop search/results.
+- Persisted splitter proportions between launches and restored them after switching tabs.
+- Added a one-click Play button that launches Barotrauma through Steam using AppID 602960.
+- Added safe Steam Workshop request/response diagnostics, result validation counters, and clearer network error messages.
+- Kept Steam API keys out of request diagnostics and error logs.
 
 ## 2.7.1 — Windows packaging update
 
 - Replaced the self-extracting PyInstaller --onefile executable with an explicit --onedir application bundle.
-- The Windows ZIP now contains the executable and its complete runtime directory; preserve the folder structure when extracting.
+- The Windows ZIP contains the executable and its complete runtime directory; preserve the folder structure when extracting.
 - Kept the Russian/English first-run language selector and saved per-PC preference.
 - Kept the optional Boosty donation link; all manager features remain free.
 
