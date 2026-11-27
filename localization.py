@@ -20,6 +20,7 @@ _EN = {
 
     "Проверка путей…": "Checking paths…",
     "⚙ НАСТРОЙКИ": "⚙ SETTINGS",
+    "▶ ИГРАТЬ": "▶ PLAY",
     "✕ ЗАКРЫТЬ НАСТРОЙКИ": "✕ CLOSE SETTINGS",
     "РАСПОЛОЖЕНИЕ И ИНСТРУМЕНТЫ": "LOCATIONS & TOOLS",
     "Папка игры, SteamCMD и клиентский LuaCs-патч доступны в настройках.": "The game folder, SteamCMD and the client LuaCs patch are available in Settings.",
@@ -154,6 +155,9 @@ _EN = {
     "LuaCs-патч установлен. Бэкап сохранён.": "LuaCs patch installed. A backup was saved.",
     "Ошибка LuaCs": "LuaCs error",
     "Ошибка": "Error",
+    "Ошибка запуска": "Launch error",
+    "Не удалось передать запуск Barotrauma клиенту Steam. Проверь, что Steam установлен и обработчик steam:// доступен.": "Could not send the Barotrauma launch request to Steam. Make sure Steam is installed and the steam:// handler is available.",
+    "[Game] Запрос запуска Barotrauma передан Steam.": "[Game] Barotrauma launch request sent to Steam.",
     "Откат": "Rollback",
     "Файлы LuaCs восстановлены.": "LuaCs files have been restored.",
     "Откат LuaCs": "LuaCs rollback",

@@ -4,6 +4,7 @@ import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -35,11 +36,46 @@ with tempfile.TemporaryDirectory() as config_dir, tempfile.TemporaryDirectory() 
     app = mod.ModManagerGUI()
     try:
         app.geometry("1260x860")
-        app.notebook.select(app.workshop_tab)
         app.update_idletasks()
+
+        # Each major content section uses a draggable vertical sash.
+        assert app.profile_sections.cget("orient") == "vertical"
+        assert len(app.profile_sections.panes()) == 4
+        assert int(app.profile_sections.cget("sashwidth")) >= 8
+        assert app.workshop_sections.cget("orient") == "vertical"
+        assert len(app.workshop_sections.panes()) == 2
+
+        # The profile tab must be mapped before its sash positions can be tested.
+        app.notebook.select(app.profile_tab)
+        app.update()
+        profile_sash_y = app.profile_sections.sash_coord(0)[1]
+        assert app.profile_sections.winfo_ismapped(), "Profile splitter was not mapped"
+        assert app.profile_sections.winfo_height() > 160, (
+            f"Profile splitter height is too small: {app.profile_sections.winfo_height()}, "
+            f"notebook={app.notebook.winfo_height()}, root={app.winfo_height()}"
+        )
+
+        # Splitter positions are persisted as normalized ratios, not screen pixels.
+        app.profile_sections.sash_place(0, 0, profile_sash_y + 6)
+        app._save_paned_sizes(app.profile_sections, "profile_section_ratios")
+        saved_profile_ratios = app.store.data.get("profile_section_ratios")
+        assert isinstance(saved_profile_ratios, list) and len(saved_profile_ratios) == 3
+        assert all(0.0 < ratio < 1.0 for ratio in saved_profile_ratios)
+
+        # Workshop proportions are restored on first tab activation, not while hidden.
+        app.store.data["workshop_section_ratios"] = [0.42]
+        app.notebook.select(app.workshop_tab)
+        app.update()
+        workshop_height = app.workshop_sections.winfo_height()
+        workshop_sash_y = app.workshop_sections.sash_coord(0)[1]
+        assert workshop_height > 300
+        assert abs(workshop_sash_y - int(workshop_height * 0.42)) < 24, (
+            workshop_sash_y, workshop_height
+        )
 
         # Exercise the English widget pass and make sure internal values stay stable.
         assert app.language == "en"
+        assert app.play_game_btn.cget("text") == "▶ PLAY"
         assert app.notebook.tab(app.profile_tab, "text").strip() == "MY PROFILES"
         assert app.profile_combo.get() == "Main"
         assert app.workshop_type_combo.get() == "Mods"
@@ -105,4 +141,13 @@ with tempfile.TemporaryDirectory() as config_dir, tempfile.TemporaryDirectory() 
         app._closing = True
         app.destroy()
 
-print("PASS: Tkinter Workshop wheel + resize debounce smoke test")
+# The Play action must dispatch the official Steam protocol, never a guessed executable path.
+with mock.patch.object(mod.os, "startfile", create=True) as start_file:
+    launch_app = mod.ModManagerGUI.__new__(mod.ModManagerGUI)
+    launch_logs = []
+    launch_app.log = launch_logs.append
+    assert launch_app.launch_game() is True
+    start_file.assert_called_once_with("steam://run/602960")
+    assert any("передан Steam" in line for line in launch_logs)
+
+print("PASS: Tkinter Workshop resize + Barotrauma launch smoke tests")
