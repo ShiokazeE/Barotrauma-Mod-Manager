@@ -1,0 +1,2 @@
+Barotrauma Mod Manager 2.7.2
+Windows build source: main after 2026-11-27 UI and Steam launch updates.
