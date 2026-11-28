@@ -88,32 +88,7 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:RELEASE_TAG)) {
             throw "Release tag cannot be empty."
           }
-          if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.-]+)?        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v3
-        with:
-          name: Barotrauma Mod Manager ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-          target_commitish: ${{ github.sha }}
-          body: |
-            Direct launch and Windows reliability update.
-
-            - Launch Barotrauma.exe directly from the selected game folder without invoking the Steam URI handler.
-            - Block game launch while a profile, LuaCs, SteamCMD, or Workshop operation is active.
-            - Restart the manager safely after changing language, including paths containing spaces.
-            - Align the application version with HTTP User-Agent headers.
-            - Keep the portable onedir folder structure intact when extracting the ZIP.
-
-            Support development: https://boosty.to/shiokaze/single-payment/donation/841459/target?share=target_link
-          draft: false
-          prerelease: false
-          make_latest: true
-          files: |
-            Barotrauma-Mod-Manager-Windows.zip
-            SHA256SUMS.txt
-          overwrite_files: true
-          fail_on_unmatched_files: true
-          generate_release_notes: false
-) {
+          if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.-]+)?$') {
             throw "Release tag must look like v2.7.3."
           }
 
@@ -132,8 +107,6 @@ jobs:
             - Restart the manager safely after changing language, including paths containing spaces.
             - Align the application version with HTTP User-Agent headers.
             - Keep the portable onedir folder structure intact when extracting the ZIP.
-
-            Support development: https://boosty.to/shiokaze/single-payment/donation/841459/target?share=target_link
           draft: false
           prerelease: false
           make_latest: true
