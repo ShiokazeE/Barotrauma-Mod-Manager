@@ -2,9 +2,15 @@ name: Build Windows
 
 on:
   push:
-    branches: ["setup/**"]
+    branches: ["main", "setup/**"]
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to publish (for example v2.7.3)"
+        required: false
+        default: "v2.7.3"
+        type: string
 
 permissions:
   contents: write
@@ -73,31 +79,59 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Point v2.7.1 tag at the tested source commit
+      - name: Validate manual release tag
         if: github.event_name == 'workflow_dispatch'
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag --force v2.7.1 "$env:GITHUB_SHA"
-          git push --force origin refs/tags/v2.7.1
+          if ([string]::IsNullOrWhiteSpace($env:RELEASE_TAG)) {
+            throw "Release tag cannot be empty."
+          }
+          if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.-]+)?        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v3
+        with:
+          name: Barotrauma Mod Manager ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          body: |
+            Direct launch and Windows reliability update.
+
+            - Launch Barotrauma.exe directly from the selected game folder without invoking the Steam URI handler.
+            - Block game launch while a profile, LuaCs, SteamCMD, or Workshop operation is active.
+            - Restart the manager safely after changing language, including paths containing spaces.
+            - Align the application version with HTTP User-Agent headers.
+            - Keep the portable onedir folder structure intact when extracting the ZIP.
+
+            Support development: https://boosty.to/shiokaze/single-payment/donation/841459/target?share=target_link
+          draft: false
+          prerelease: false
+          make_latest: true
+          files: |
+            Barotrauma-Mod-Manager-Windows.zip
+            SHA256SUMS.txt
+          overwrite_files: true
+          fail_on_unmatched_files: true
+          generate_release_notes: false
+) {
+            throw "Release tag must look like v2.7.3."
+          }
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v3
         with:
-          name: Barotrauma Mod Manager ${{ github.event_name == 'workflow_dispatch' && 'v2.7.1' || github.ref_name }}
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && 'v2.7.1' || github.ref_name }}
+          name: Barotrauma Mod Manager ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
           target_commitish: ${{ github.sha }}
           body: |
-            Windows packaging update.
+            Direct launch and Windows reliability update.
 
-            - Replaced the self-extracting PyInstaller executable with a transparent onedir application bundle.
-            - The ZIP contains the executable and its required runtime files; keep the extracted folder structure intact.
-            - Russian and English interface selection is saved locally on this PC.
-            - All manager features remain free; Boosty support is optional.
-
-            Windows package: extract the ZIP, keep the complete BarotraumaModManager folder together, and run BarotraumaModManager.exe inside it.
+            - Launch Barotrauma.exe directly from the selected game folder without invoking the Steam URI handler.
+            - Block game launch while a profile, LuaCs, SteamCMD, or Workshop operation is active.
+            - Restart the manager safely after changing language, including paths containing spaces.
+            - Align the application version with HTTP User-Agent headers.
+            - Keep the portable onedir folder structure intact when extracting the ZIP.
 
             Support development: https://boosty.to/shiokaze/single-payment/donation/841459/target?share=target_link
           draft: false

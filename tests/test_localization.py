@@ -10,6 +10,18 @@ from localization import load_language, save_language, translate
 
 
 class LocalizationTests(unittest.TestCase):
+    def test_direct_launch_translations(self):
+        self.assertEqual(translate("Запуск игры", "en"), "Launch game")
+        self.assertEqual(translate("Ошибка запуска", "en"), "Launch error")
+        self.assertEqual(
+            translate("Дождись завершения текущей операции перед запуском игры.", "en"),
+            "Wait for the current operation to finish before launching the game.",
+        )
+        self.assertEqual(
+            translate("Не найден файл Barotrauma.exe: ", "en"),
+            "Barotrauma.exe was not found: ",
+        )
+
     def test_english_static_and_dynamic_translations(self):
         self.assertEqual(translate("МОИ ПРОФИЛИ", "en"), "MY PROFILES")
         self.assertEqual(translate("ПОРЯДОК ПРОФИЛЯ", "en"), "PROFILE ORDER")

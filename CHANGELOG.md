@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.7.3 — Direct launch and Windows reliability
+
+- Launch Barotrauma.exe directly from the configured game directory without relying on the Steam URI handler.
+- Block game launch while profile, LuaCs, SteamCMD, or Workshop operations are active.
+- Report missing game directories and missing Barotrauma.exe paths clearly.
+- Restart the manager with subprocess.Popen after a language change; argument lists and cwd are handled safely on Windows paths containing spaces.
+- Align both HTTP User-Agent headers with the application version.
+- Treat the Russian and English quick-add prompt text as a placeholder instead of a submitted value.
+- Exclude packaging and test-only modules from the PyInstaller bundle to reduce unnecessary files.
+
 ## 2.7.2 — Resizable UI and Steam launch
 
 - Added Discord-style draggable splitters for the profile sections and Steam Workshop search/results.
