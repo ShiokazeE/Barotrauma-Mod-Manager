@@ -32,7 +32,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 BAROTRAUMA_APP_ID = "602960"
-APP_VERSION = "2.7.3"
+APP_VERSION = "2.7.4"
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 STEAMCMD_ZIP_URLS = [
@@ -110,6 +110,11 @@ BUILD_PACK_MAX_BYTES = 8 * 1024 * 1024
 BUILD_PACK_FORMAT = "barotrauma-mod-manager-pack"
 BUILD_PACK_FORMAT_VERSION = 1
 BUILD_PACK_MAX_DESCRIPTION = 2000
+MAX_ZIP_INSPECT_BYTES = 512 * 1024 * 1024
+MAX_ZIP_INSPECT_UNPACKED_BYTES = 2 * 1024 * 1024 * 1024
+MAX_ZIP_INSPECT_ENTRIES = 50_000
+MAX_ZIP_INSPECT_COMPRESSION_RATIO = 500
+MAX_ZIP_FILELIST_BYTES = 5 * 1024 * 1024
 
 
 def safe_extract_zip(zf: zipfile.ZipFile, destination: Path,
@@ -156,6 +161,137 @@ def safe_extract_zip(zf: zipfile.ZipFile, destination: Path,
         target.parent.mkdir(parents=True, exist_ok=True)
         with zf.open(info, "r") as source, target.open("wb") as output:
             shutil.copyfileobj(source, output, length=1024 * 1024)
+
+
+def inspect_barotrauma_zip(path: Path) -> dict:
+    """Inspect ZIP safety, CRCs and the package manifest without extracting anything."""
+    path = Path(path)
+    try:
+        if not path.is_file():
+            raise ValueError("Выбранный файл не найден или не является обычным файлом.")
+        archive_size = path.stat().st_size
+    except OSError as exc:
+        raise ValueError(f"Не удалось прочитать ZIP-архив: {exc}") from exc
+
+    if archive_size <= 0:
+        raise ValueError("ZIP-архив пустой.")
+    if archive_size > MAX_ZIP_INSPECT_BYTES:
+        raise ValueError("Размер ZIP-архива превышает лимит проверки (512 МБ).")
+
+    try:
+        with zipfile.ZipFile(path, "r") as archive:
+            infos = archive.infolist()
+            if not infos:
+                raise ValueError("ZIP-архив не содержит записей.")
+            if len(infos) > MAX_ZIP_INSPECT_ENTRIES:
+                raise ValueError("В архиве слишком много файловых записей.")
+
+            seen_paths: set[str] = set()
+            file_count = 0
+            unpacked_size = 0
+            filelists = []
+
+            for info in infos:
+                name = str(info.filename or "")
+                if not name or "\x00" in name:
+                    raise ValueError("В архиве найдена запись с некорректным именем.")
+
+                normalized = name.replace("\\", "/")
+                if normalized.startswith("/") or re.match(r"^[A-Za-z]:", normalized):
+                    raise ValueError(f"Небезопасный абсолютный путь в ZIP: {name}")
+
+                parts = normalized.split("/")
+                if info.is_dir() and parts and parts[-1] == "":
+                    parts = parts[:-1]
+                if (
+                    not parts
+                    or any(part in ("", ".", "..") for part in parts)
+                    or any(":" in part for part in parts)
+                ):
+                    raise ValueError(f"Небезопасный путь в ZIP: {name}")
+
+                mode = (info.external_attr >> 16) & 0xFFFF
+                if stat.S_ISLNK(mode):
+                    raise ValueError(f"Символическая ссылка в ZIP запрещена: {name}")
+                file_type = stat.S_IFMT(mode)
+                if file_type not in (0, stat.S_IFREG, stat.S_IFDIR):
+                    raise ValueError(f"Специальный тип файла в ZIP запрещён: {name}")
+                if info.flag_bits & 0x1:
+                    raise ValueError("Зашифрованные ZIP-записи не поддерживаются.")
+
+                normalized_key = "/".join(parts).casefold()
+                if normalized_key in seen_paths:
+                    raise ValueError(f"Повторяющийся путь в ZIP: {name}")
+                seen_paths.add(normalized_key)
+
+                if info.file_size < 0 or info.compress_size < 0:
+                    raise ValueError(f"Некорректный размер записи в ZIP: {name}")
+                if info.is_dir():
+                    continue
+
+                file_count += 1
+                if info.file_size > MAX_ZIP_INSPECT_UNPACKED_BYTES:
+                    raise ValueError("Одна из записей слишком велика для безопасной проверки.")
+                unpacked_size += info.file_size
+                if unpacked_size > MAX_ZIP_INSPECT_UNPACKED_BYTES:
+                    raise ValueError("Распакованный размер архива превышает лимит (2 ГБ).")
+                if info.file_size and not info.compress_size:
+                    raise ValueError(f"Подозрительная степень сжатия: {name}")
+                if info.compress_size and (
+                    info.file_size / info.compress_size > MAX_ZIP_INSPECT_COMPRESSION_RATIO
+                ):
+                    raise ValueError(f"Подозрительная степень сжатия: {name}")
+
+                if PurePosixPath(normalized).name.casefold() == "filelist.xml":
+                    filelists.append(info)
+
+            if file_count == 0:
+                raise ValueError("В ZIP-архиве нет файлов.")
+            if not filelists:
+                raise ValueError("В архиве не найден filelist.xml Barotrauma.")
+            if len(filelists) != 1:
+                raise ValueError("В архиве найдено несколько filelist.xml; структура неоднозначна.")
+
+            filelist_info = filelists[0]
+            if filelist_info.file_size > MAX_ZIP_FILELIST_BYTES:
+                raise ValueError("filelist.xml превышает допустимый размер 5 МБ.")
+            raw_filelist = archive.read(filelist_info)
+            if b"<!DOCTYPE" in raw_filelist.upper() or b"<!ENTITY" in raw_filelist.upper():
+                raise ValueError("DTD и пользовательские XML-сущности в filelist.xml запрещены.")
+
+            try:
+                root = ET.fromstring(raw_filelist)
+            except ET.ParseError as exc:
+                raise ValueError(f"Некорректный filelist.xml: {exc}") from exc
+
+            root_tag = str(root.tag).split("}")[-1].casefold()
+            if root_tag != "contentpackage":
+                raise ValueError("Корневой элемент filelist.xml должен быть <contentpackage>.")
+
+            damaged_entry = archive.testzip()
+            if damaged_entry is not None:
+                raise ValueError(f"CRC-проверка обнаружила повреждённый файл: {damaged_entry}")
+
+            normalized_filelist = filelist_info.filename.replace("\\", "/")
+            package_root = str(PurePosixPath(normalized_filelist).parent)
+            if package_root == ".":
+                package_root = "(корень архива)"
+
+            return {
+                "entry_count": len(infos),
+                "file_count": file_count,
+                "archive_size": archive_size,
+                "unpacked_size": unpacked_size,
+                "package_root": package_root,
+                "package_name": str(root.attrib.get("name", "")).strip()[:160],
+                "crc_ok": True,
+                "filelist_ok": True,
+            }
+    except ValueError:
+        raise
+    except (zipfile.BadZipFile, OSError, RuntimeError, KeyError, NotImplementedError) as exc:
+        raise ValueError(f"Не удалось проверить ZIP-архив: {exc}") from exc
+
 
 
 def is_trusted_steam_cdn_url(url: str) -> bool:
@@ -2302,6 +2438,7 @@ class ModManagerGUI(tk.Tk):
         self.configure(bg="#101318")
 
         self._closing = False
+        self._zip_check_running = False
         self._profile_job_running = False
         self._lua_job_running = False
         self._steamcmd_job_running = False
@@ -2948,6 +3085,11 @@ class ModManagerGUI(tk.Tk):
                color="#263e52", hover="#31536d", track=True).pack(side="left", padx=(0, 5))
         button(list_toolbar, "ЭКСПОРТ XML", self.export_modlist_xml,
                color="#263e52", hover="#31536d", track=True).pack(side="left", padx=(0, 5))
+        self.zip_check_btn = button(
+            list_toolbar, "ПРОВЕРКА ZIP", self.check_zip_archive,
+            color="#244b63", hover="#2c607d", track=True,
+        )
+        self.zip_check_btn.pack(side="left", padx=(0, 5))
         button(list_toolbar, "СОХРАНИТЬ СБОРКУ", self.export_build_pack,
                color="#315947", hover="#3d7059", track=True).pack(side="left", padx=(0, 5))
         button(list_toolbar, "ИМПОРТ СБОРКИ", self.import_build_pack,
@@ -3474,6 +3616,11 @@ class ModManagerGUI(tk.Tk):
         self.profile_combo.config(state="disabled" if running else "readonly")
         for widget in self._profile_action_widgets:
             widget.config(state=state)
+        zip_button = getattr(self, "zip_check_btn", None)
+        if zip_button is not None:
+            zip_button.config(
+                state="disabled" if running or self._zip_check_running else "normal"
+            )
         if not running:
             self._refresh_workshop_card_states()
 
@@ -4748,6 +4895,76 @@ class ModManagerGUI(tk.Tk):
                         self._tr("Сборка импортирована"), import_summary, parent=self,
                     )
             self.after(0, finish)
+
+
+    def check_zip_archive(self):
+        """Open a ZIP file and run the read-only package validator."""
+        if self._profile_job_running or self._zip_check_running:
+            return
+
+        selected_path = filedialog.askopenfilename(
+            parent=self,
+            title="Проверка ZIP-архива",
+            initialdir=str(Path.home()),
+            filetypes=(("ZIP-архивы", "*.zip"), ("Все файлы", "*.*")),
+        )
+        if not selected_path:
+            return
+
+        self._zip_check_running = True
+        self.zip_check_btn.config(state="disabled")
+        self.log(
+            f"[ZIP] Проверяю «{Path(selected_path).name}»: безопасность путей, "
+            "filelist.xml и целостность CRC. Распаковки не будет."
+        )
+        threading.Thread(
+            target=self._worker_check_zip_archive,
+            args=(selected_path,),
+            daemon=True,
+        ).start()
+
+    def _worker_check_zip_archive(self, source_file: str):
+        result = None
+        error = None
+        try:
+            result = inspect_barotrauma_zip(Path(source_file))
+        except Exception as exc:
+            error = str(exc)
+
+        if self._closing:
+            return
+
+        def finish():
+            if self._closing:
+                return
+            self._zip_check_running = False
+            self.zip_check_btn.config(
+                state="disabled" if self._profile_job_running else "normal"
+            )
+            if error:
+                self.log(f"[ZIP] Проверка не пройдена: {error}")
+                messagebox.showerror("Проверка ZIP-архива", error, parent=self)
+                return
+
+            self.log(
+                f"[ZIP] Проверка пройдена: {result['file_count']} файлов, "
+                f"filelist.xml найден в «{result['package_root']}»."
+            )
+            mib = 1024 * 1024
+            summary = (
+                f"{self._tr('ZIP-архив прошёл проверку структуры и целостности.')}\\n\\n"
+                f"{self._tr('Папка пакета: ')}{result['package_root']}\\n"
+                f"{self._tr('Название пакета: ')}{result['package_name'] or '—'}\\n"
+                f"{self._tr('Файлов: ')}{result['file_count']}\\n"
+                f"{self._tr('Размер архива: ')}{result['archive_size'] / mib:.2f} MiB\\n"
+                f"{self._tr('Распакованный размер: ')}{result['unpacked_size'] / mib:.2f} MiB\\n"
+                f"{self._tr('filelist.xml: корректный XML.')}\\n"
+                f"{self._tr('CRC всех файлов: успешно.')}\\n\\n"
+                f"{self._tr('Это только проверка. Архив не распакован и не установлен.')}"
+            )
+            messagebox.showinfo("Проверка ZIP-архива", summary, parent=self)
+
+        self.after(0, finish)
 
     def import_modlist_xml(self):
         """Import the author's native <mods><Vanilla/><Workshop/></mods> preset."""
