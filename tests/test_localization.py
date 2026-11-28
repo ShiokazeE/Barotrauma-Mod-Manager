@@ -10,6 +10,14 @@ from localization import load_language, save_language, translate
 
 
 class LocalizationTests(unittest.TestCase):
+    def test_zip_check_translations(self):
+        self.assertEqual(translate("ПРОВЕРКА ZIP", "en"), "ZIP CHECK")
+        self.assertEqual(
+            translate("ZIP-архив прошёл проверку структуры и целостности.", "en"),
+            "ZIP archive structure and integrity checks passed.",
+        )
+        self.assertEqual(translate("filelist.xml: корректный XML.", "en"), "filelist.xml: valid XML.")
+
     def test_direct_launch_translations(self):
         self.assertEqual(translate("Запуск игры", "en"), "Launch game")
         self.assertEqual(translate("Ошибка запуска", "en"), "Launch error")

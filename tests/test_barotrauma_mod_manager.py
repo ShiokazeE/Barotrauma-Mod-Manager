@@ -794,3 +794,51 @@ with (
     mod.ModManagerGUI.download_and_add_to_profile(placeholder_app)
 info.assert_called_once()
 print("PASS: direct launch guards + quick-add placeholder")
+
+
+# Read-only ZIP validation: validates the package manifest and CRC without extracting files.
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    archive_path = root / "valid-package.zip"
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("MyLocalPackage/filelist.xml", '<contentpackage name="Local package" />')
+        archive.writestr("MyLocalPackage/Content/sample.xml", "<sample />")
+
+    result = mod.inspect_barotrauma_zip(archive_path)
+    assert result["file_count"] == 2
+    assert result["package_root"] == "MyLocalPackage"
+    assert result["package_name"] == "Local package"
+    assert result["crc_ok"] and result["filelist_ok"]
+    assert not (root / "MyLocalPackage").exists(), "ZIP check must never extract files"
+
+    traversal_path = root / "traversal.zip"
+    with zipfile.ZipFile(traversal_path, "w") as archive:
+        archive.writestr("../outside.txt", "blocked")
+    try:
+        mod.inspect_barotrauma_zip(traversal_path)
+    except ValueError as exc:
+        assert "Небезопасный путь" in str(exc)
+    else:
+        raise AssertionError("ZIP path traversal was accepted")
+
+    missing_manifest_path = root / "missing-manifest.zip"
+    with zipfile.ZipFile(missing_manifest_path, "w") as archive:
+        archive.writestr("readme.txt", "no package manifest")
+    try:
+        mod.inspect_barotrauma_zip(missing_manifest_path)
+    except ValueError as exc:
+        assert "filelist.xml" in str(exc)
+    else:
+        raise AssertionError("ZIP without filelist.xml was accepted")
+
+    malformed_manifest_path = root / "malformed-manifest.zip"
+    with zipfile.ZipFile(malformed_manifest_path, "w") as archive:
+        archive.writestr("filelist.xml", "<contentpackage")
+    try:
+        mod.inspect_barotrauma_zip(malformed_manifest_path)
+    except ValueError as exc:
+        assert "Некорректный filelist.xml" in str(exc)
+    else:
+        raise AssertionError("Malformed filelist.xml was accepted")
+
+print("PASS: read-only ZIP validation (structure, manifest, CRC and path safety)")
