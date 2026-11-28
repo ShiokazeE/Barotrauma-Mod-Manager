@@ -141,13 +141,27 @@ with tempfile.TemporaryDirectory() as config_dir, tempfile.TemporaryDirectory() 
         app._closing = True
         app.destroy()
 
-# The Play action must dispatch the official Steam protocol, never a guessed executable path.
-with mock.patch.object(mod.os, "startfile", create=True) as start_file:
-    launch_app = mod.ModManagerGUI.__new__(mod.ModManagerGUI)
+# The Play action launches the selected Barotrauma.exe directly.
+with tempfile.TemporaryDirectory() as game_dir:
+    exe_path = Path(game_dir).resolve() / "Barotrauma.exe"
+    exe_path.write_bytes(b"MZ")
     launch_logs = []
-    launch_app.log = launch_logs.append
-    assert launch_app.launch_game() is True
-    start_file.assert_called_once_with("steam://run/602960")
-    assert any("передан Steam" in line for line in launch_logs)
+    launch_app = SimpleNamespace(
+        game_dir_var=SimpleNamespace(get=lambda: game_dir),
+        _profile_job_running=False,
+        _lua_job_running=False,
+        _steamcmd_job_running=False,
+        _workshop_job_running=False,
+        log=launch_logs.append,
+        _tr=lambda value: value,
+    )
+    with mock.patch.object(mod.subprocess, "Popen") as popen:
+        assert mod.ModManagerGUI.launch_game(launch_app) is True
+    popen.assert_called_once_with(
+        [str(exe_path)],
+        cwd=str(Path(game_dir).resolve()),
+        close_fds=True,
+    )
+    assert any("Игра запущена напрямую" in line for line in launch_logs)
 
 print("PASS: Tkinter Workshop resize + Barotrauma launch smoke tests")
