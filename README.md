@@ -8,7 +8,7 @@
   <p>
     <img src="https://img.shields.io/badge/platform-Windows-2678c8?logo=windows&logoColor=white" alt="Windows">
     <img src="https://img.shields.io/badge/Python-3.10%2B-3776ab?logo=python&logoColor=white" alt="Python 3.10+">
-    <img src="https://img.shields.io/badge/version-2.7.3-17a673" alt="Version 2.7.1">
+    <img src="https://img.shields.io/badge/version-2.7.4-17a673" alt="Version 2.7.4">
     <img src="https://img.shields.io/badge/game-Barotrauma-0d6578" alt="Barotrauma">
     <a href="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/actions/workflows/ci.yml"><img src="https://github.com/ShiokazeE/Barotrauma-Mod-Manager/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   </p>
@@ -16,7 +16,7 @@
 
 Barotrauma Mod Manager helps you browse Steam Workshop, install mods and collections, maintain separate load-order profiles, and apply a chosen profile to the game.
 
-> **Project status:** community project in active development. Version 2.7.3 launches Barotrauma.exe directly from the selected game folder and improves Windows restart and packaging reliability. The portable Windows package is built by GitHub Actions.
+> **Project status:** community project in active development. Version 2.7.4 adds a read-only ZIP package check alongside direct game launch and Windows reliability improvements. The portable Windows package is built by GitHub Actions.
 
 Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma-Mod-Manager/) · Source code: [GitHub repository](https://github.com/ShiokazeE/Barotrauma-Mod-Manager)
 
@@ -33,6 +33,7 @@ Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma
 - **Update checks** — compare installed versions with Workshop metadata and download updates.
 - **Conflict inspection** — scan XML identifiers for possible overlaps.
 - **LuaCs helper** — install the client patch with a backup and rollback option.
+- **ZIP package check** — validate the `filelist.xml` manifest, archive paths and CRC integrity without extracting files.
 - **Safer file handling** — archive path validation, staged installs, profile persistence and backups before applying the game configuration.
 
 ## Screenshots
