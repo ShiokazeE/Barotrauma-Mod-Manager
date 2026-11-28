@@ -8,7 +8,7 @@
 
 Barotrauma Mod Manager помогает искать моды и коллекции в Steam Workshop, устанавливать их в `LocalMods`, управлять отдельными профилями и применять выбранный порядок загрузки в игре.
 
-> **Статус проекта:** любительский проект в активной разработке. Версия 2.7.2 добавляет изменяемые секции интерфейса, кнопку запуска Barotrauma через Steam и улучшенную диагностику Workshop. Портативная Windows-сборка создаётся через GitHub Actions.
+> **Статус проекта:** любительский проект в активной разработке. Версия 2.7.3 запускает Barotrauma.exe напрямую из выбранной папки игры и улучшает перезапуск менеджера и Windows-сборку. Портативная Windows-сборка создаётся через GitHub Actions.
 
 Project website: [Barotrauma Mod Manager](https://shiokazee.github.io/Barotrauma-Mod-Manager/) · Source code: [GitHub repository](https://github.com/ShiokazeE/Barotrauma-Mod-Manager)
 

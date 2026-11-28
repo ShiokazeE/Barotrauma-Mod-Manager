@@ -19,7 +19,7 @@ if errorlevel 1 goto fail
 
 echo.
 echo [3/4] Building BarotraumaModManager (onedir)...
-%PYTHON_CMD% -m PyInstaller --noconfirm --clean --onedir --windowed --name "BarotraumaModManager" --collect-all certifi --collect-all PIL "barotrauma_mod_manager.py"
+%PYTHON_CMD% -m PyInstaller --noconfirm --clean --onedir --windowed --name "BarotraumaModManager" --collect-all certifi --collect-all PIL --exclude-module setuptools --exclude-module pkg_resources --exclude-module pip --exclude-module wheel --exclude-module unittest --exclude-module pytest --exclude-module PIL.AvifImagePlugin "barotrauma_mod_manager.py"
 if errorlevel 1 goto fail
 
 if not exist "dist\BarotraumaModManager\BarotraumaModManager.exe" goto fail

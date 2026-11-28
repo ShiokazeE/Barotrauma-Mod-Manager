@@ -7,6 +7,8 @@ import time
 import zipfile
 from pathlib import Path
 import sys
+from types import SimpleNamespace
+from unittest import mock
 
 # Keep application state out of the user's real profile during tests.
 with tempfile.TemporaryDirectory() as config_tmp:
@@ -726,3 +728,69 @@ with tempfile.TemporaryDirectory() as tmp:
     assert (core.local_mods_dir / mid / 'filelist.xml').is_file()
 
 print('PASS: CDN failure falls back to SteamCMD')
+
+# Direct game launch uses the selected executable and refuses to race background jobs.
+with tempfile.TemporaryDirectory() as tmp:
+    game_dir = Path(tmp).resolve()
+    exe_path = game_dir / "Barotrauma.exe"
+    exe_path.write_bytes(b"MZ")
+    launch_app = SimpleNamespace(
+        game_dir_var=SimpleNamespace(get=lambda: str(game_dir)),
+        _profile_job_running=False,
+        _lua_job_running=False,
+        _steamcmd_job_running=False,
+        _workshop_job_running=False,
+        _tr=lambda value: value,
+        log=lambda _message: None,
+    )
+    with mock.patch.object(mod.subprocess, "Popen") as popen:
+        assert mod.ModManagerGUI.launch_game(launch_app) is True
+    popen.assert_called_once_with([str(exe_path)], cwd=str(game_dir), close_fds=True)
+
+    for busy_flag in (
+        "_profile_job_running",
+        "_lua_job_running",
+        "_steamcmd_job_running",
+        "_workshop_job_running",
+    ):
+        busy_app = SimpleNamespace(**vars(launch_app))
+        setattr(busy_app, busy_flag, True)
+        with (
+            mock.patch.object(mod.messagebox, "showwarning") as warning,
+            mock.patch.object(mod.subprocess, "Popen") as busy_popen,
+        ):
+            assert mod.ModManagerGUI.launch_game(busy_app) is False
+        warning.assert_called_once()
+        busy_popen.assert_not_called()
+
+# Missing executable is reported and never passed to subprocess.
+with tempfile.TemporaryDirectory() as tmp:
+    missing_app = SimpleNamespace(
+        game_dir_var=SimpleNamespace(get=lambda: tmp),
+        _profile_job_running=False,
+        _lua_job_running=False,
+        _steamcmd_job_running=False,
+        _workshop_job_running=False,
+        _tr=lambda value: value,
+        log=lambda _message: None,
+    )
+    with (
+        mock.patch.object(mod.messagebox, "showerror") as error,
+        mock.patch.object(mod.subprocess, "Popen") as popen,
+    ):
+        assert mod.ModManagerGUI.launch_game(missing_app) is False
+    error.assert_called_once()
+    popen.assert_not_called()
+
+# The localized quick-add placeholder must not be interpreted as a Workshop URL or ID.
+placeholder_app = SimpleNamespace(
+    _profile_job_running=False,
+    workshop_var=SimpleNamespace(get=lambda: "Вставь ссылку..."),
+)
+with (
+    mock.patch.object(mod.messagebox, "showinfo") as info,
+    mock.patch.object(mod.ModManagerGUI, "_get_core", side_effect=AssertionError("placeholder started a job")),
+):
+    mod.ModManagerGUI.download_and_add_to_profile(placeholder_app)
+info.assert_called_once()
+print("PASS: direct launch guards + quick-add placeholder")

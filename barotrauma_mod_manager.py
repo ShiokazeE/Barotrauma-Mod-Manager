@@ -32,6 +32,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 BAROTRAUMA_APP_ID = "602960"
+APP_VERSION = "2.7.3"
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 STEAMCMD_ZIP_URLS = [
@@ -658,7 +659,7 @@ class BaroModManagerCore:
         self.workshop_content_dir = self.steamcmd_dir / "steamapps" / "workshop" / "content" / BAROTRAUMA_APP_ID
         self.local_mods_dir = self.game_dir / "LocalMods"
         self.session = requests.Session()
-        self.session.headers.update({"User-Agent": "BarotraumaModManager/2.6"})
+        self.session.headers.update({"User-Agent": f"BarotraumaModManager/{APP_VERSION}"})
         retry = Retry(
             total=4, connect=3, read=3, status=3, backoff_factor=0.6,
             status_forcelist=(429, 500, 502, 503, 504),
@@ -1952,7 +1953,7 @@ class BaroModManagerCore:
             def direct_download(mid: str):
                 try:
                     with requests.Session() as http:
-                        http.headers.update({"User-Agent": "BarotraumaModManager/2.6"})
+                        http.headers.update({"User-Agent": f"BarotraumaModManager/{APP_VERSION}"})
                         return self._download_mod_from_cdn(
                             mid, metadata.get(mid, {}), http_session=http
                         )
@@ -2295,7 +2296,7 @@ class ModManagerGUI(tk.Tk):
         super().__init__()
         self.language = choose_or_load_language(self, LANGUAGE_FILE)
         self._install_dialog_localization()
-        self.title("Barotrauma Mod Manager 2.7.2")
+        self.title(f"Barotrauma Mod Manager {APP_VERSION}")
         self.geometry("1260x860")
         self.minsize(1020, 720)
         self.configure(bg="#101318")
@@ -2561,31 +2562,56 @@ class ModManagerGUI(tk.Tk):
             localize_variable()
 
     def launch_game(self) -> bool:
-        """Ask Steam to launch Barotrauma through its registered protocol handler."""
-        steam_uri = f"steam://run/{BAROTRAUMA_APP_ID}"
-        try:
-            if os.name == "nt":
-                # Windows shell dispatches the Steam protocol to the installed Steam client.
-                start_file = getattr(os, "startfile", None)
-                if start_file is None:
-                    raise OSError("Windows URI handler is unavailable.")
-                start_file(steam_uri)
-            else:
-                if not webbrowser.open(steam_uri, new=1):
-                    raise OSError("No application accepted the Steam launch URI.")
-        except Exception as exc:
-            self.log(f"[Game] Launch request failed ({type(exc).__name__}).")
-            messagebox.showerror(
-                self._tr("Ошибка запуска"),
-                self._tr(
-                    "Не удалось передать запуск Barotrauma клиенту Steam. "
-                    "Проверь, что Steam установлен и обработчик steam:// доступен."
-                ),
+        """Launch Barotrauma.exe from the configured game directory without a Steam URI."""
+        if any((
+            getattr(self, "_profile_job_running", False),
+            getattr(self, "_lua_job_running", False),
+            getattr(self, "_steamcmd_job_running", False),
+            getattr(self, "_workshop_job_running", False),
+        )):
+            messagebox.showwarning(
+                self._tr("Запуск игры"),
+                self._tr("Дождись завершения текущей операции перед запуском игры."),
                 parent=self,
             )
             return False
 
-        self.log("[Game] Запрос запуска Barotrauma передан Steam.")
+        game_dir_value = str(self.game_dir_var.get() or "").strip()
+        if not game_dir_value:
+            messagebox.showwarning(
+                self._tr("Запуск игры"),
+                self._tr("Не выбрана папка игры."),
+                parent=self,
+            )
+            return False
+
+        try:
+            game_dir = Path(game_dir_value).expanduser().resolve()
+        except (OSError, RuntimeError) as exc:
+            message = self._tr("Папка игры не найдена: ") + str(exc)
+            messagebox.showerror(self._tr("Ошибка запуска"), message, parent=self)
+            return False
+
+        if not game_dir.is_dir():
+            message = self._tr("Папка игры не найдена: ") + str(game_dir)
+            messagebox.showerror(self._tr("Ошибка запуска"), message, parent=self)
+            return False
+
+        exe_path = game_dir / "Barotrauma.exe"
+        if not exe_path.is_file():
+            message = self._tr("Не найден файл Barotrauma.exe: ") + str(exe_path)
+            messagebox.showerror(self._tr("Ошибка запуска"), message, parent=self)
+            return False
+
+        try:
+            subprocess.Popen([str(exe_path)], cwd=str(game_dir), close_fds=True)
+        except OSError as exc:
+            self.log(f"[Game] Не удалось запустить Barotrauma.exe ({type(exc).__name__}).")
+            message = self._tr("Не удалось запустить Barotrauma.exe: ") + str(exc)
+            messagebox.showerror(self._tr("Ошибка запуска"), message, parent=self)
+            return False
+
+        self.log(self._tr("Игра запущена напрямую: ") + str(exe_path))
         return True
 
     def _change_language(self):
@@ -2607,14 +2633,23 @@ class ModManagerGUI(tk.Tk):
             )
             return
 
-        # os.execl replaces this process, avoiding two manager instances.
         if getattr(sys, "frozen", False):
-            os.execl(sys.executable, sys.executable, *sys.argv[1:])
+            command = [sys.executable, *sys.argv[1:]]
         else:
-            os.execl(
-                sys.executable, sys.executable,
-                os.path.abspath(sys.argv[0]), *sys.argv[1:],
-            )
+            command = [
+                sys.executable,
+                os.path.abspath(sys.argv[0]),
+                *sys.argv[1:],
+            ]
+
+        try:
+            subprocess.Popen(command, cwd=str(APP_DIR), close_fds=True)
+        except OSError as exc:
+            message = self._tr("Не удалось перезапустить менеджер: ") + str(exc)
+            messagebox.showerror(self._tr("Ошибка"), message, parent=self)
+            return
+
+        self.destroy()
 
     def _build_ui(self):
         BG = "#0d131b"
@@ -5137,7 +5172,13 @@ class ModManagerGUI(tk.Tk):
         if self._profile_job_running:
             return
         target = self.workshop_var.get().strip()
-        if not target or target.startswith(("Ссылка на мод", "Paste a Workshop link")):
+        placeholder_prefixes = (
+            "Вставь ссылку...",
+            "Вставь ссылку на Workshop",
+            "Ссылка на мод",
+            "Paste a Workshop link",
+        )
+        if not target or target.startswith(placeholder_prefixes):
             messagebox.showinfo("Steam Workshop", "Вставьте ссылку на мод, коллекцию или числовой ID.")
             return
         core = self._get_core()
