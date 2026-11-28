@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.7.4 — Read-only ZIP package check
+
+- Added a ZIP check button for local archives.
+- Validates archive paths, file count, size and compression ratio, checks CRCs and validates the Barotrauma filelist.xml manifest.
+- Performs all checks without extracting, installing or activating archive contents.
+
 ## 2.7.3 — Direct launch and Windows reliability
 
 - Launch Barotrauma.exe directly from the configured game directory without relying on the Steam URI handler.
