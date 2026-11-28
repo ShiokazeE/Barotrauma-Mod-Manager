@@ -100,12 +100,14 @@ jobs:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
           target_commitish: ${{ github.sha }}
           body: |
-            Direct launch and Windows reliability update.
+            Barotrauma Mod Manager 2.7.4 — read-only ZIP package validation and Windows reliability update.
 
+            - Add a ZIP check button for local archives.
+            - Validate archive paths, duplicate entries, symlinks, special files, encryption flags, entry count, size and compression ratio.
+            - Validate the Barotrauma filelist.xml manifest and verify CRC integrity for all files without extracting or installing archive contents.
             - Launch Barotrauma.exe directly from the selected game folder without invoking the Steam URI handler.
             - Block game launch while a profile, LuaCs, SteamCMD, or Workshop operation is active.
             - Restart the manager safely after changing language, including paths containing spaces.
-            - Align the application version with HTTP User-Agent headers.
             - Keep the portable onedir folder structure intact when extracting the ZIP.
           draft: false
           prerelease: false
