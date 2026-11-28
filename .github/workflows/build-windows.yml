@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release tag to publish (for example v2.7.3)"
+        description: "Release tag to publish (for example v2.7.4)"
         required: false
-        default: "v2.7.3"
+        default: "v2.7.4"
         type: string
 
 permissions:
@@ -89,7 +89,7 @@ jobs:
             throw "Release tag cannot be empty."
           }
           if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.-]+)?$') {
-            throw "Release tag must look like v2.7.3."
+            throw "Release tag must look like v2.7.4."
           }
 
       - name: Publish GitHub Release
