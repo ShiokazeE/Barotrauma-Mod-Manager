@@ -289,7 +289,7 @@ def inspect_barotrauma_zip(path: Path) -> dict:
             }
     except ValueError:
         raise
-    except (zipfile.BadZipFile, OSError, RuntimeError, KeyError, NotImplementedError) as exc:
+    except Exception as exc:
         raise ValueError(f"Не удалось проверить ZIP-архив: {exc}") from exc
 
 
@@ -4952,14 +4952,14 @@ class ModManagerGUI(tk.Tk):
             )
             mib = 1024 * 1024
             summary = (
-                f"{self._tr('ZIP-архив прошёл проверку структуры и целостности.')}\\n\\n"
-                f"{self._tr('Папка пакета: ')}{result['package_root']}\\n"
-                f"{self._tr('Название пакета: ')}{result['package_name'] or '—'}\\n"
-                f"{self._tr('Файлов: ')}{result['file_count']}\\n"
-                f"{self._tr('Размер архива: ')}{result['archive_size'] / mib:.2f} MiB\\n"
-                f"{self._tr('Распакованный размер: ')}{result['unpacked_size'] / mib:.2f} MiB\\n"
-                f"{self._tr('filelist.xml: корректный XML.')}\\n"
-                f"{self._tr('CRC всех файлов: успешно.')}\\n\\n"
+                f"{self._tr('ZIP-архив прошёл проверку структуры и целостности.')}\n\n"
+                f"{self._tr('Папка пакета: ')}{result['package_root']}\n"
+                f"{self._tr('Название пакета: ')}{result['package_name'] or '—'}\n"
+                f"{self._tr('Файлов: ')}{result['file_count']}\n"
+                f"{self._tr('Размер архива: ')}{result['archive_size'] / mib:.2f} MiB\n"
+                f"{self._tr('Распакованный размер: ')}{result['unpacked_size'] / mib:.2f} MiB\n"
+                f"{self._tr('filelist.xml: корректный XML.')}\n"
+                f"{self._tr('CRC всех файлов: успешно.')}\n\n"
                 f"{self._tr('Это только проверка. Архив не распакован и не установлен.')}"
             )
             messagebox.showinfo("Проверка ZIP-архива", summary, parent=self)
